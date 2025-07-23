@@ -84,9 +84,9 @@ if uploaded_files:
     if canvas_result.json_data is not None and len(canvas_result.json_data["objects"]) > 0:
         circle = canvas_result.json_data["objects"][0]
         if circle["type"] == "circle":
-            cx = int(round(circle["left"] + circle["scaleX"] * circle["radius"]))
-            cy = int(round(circle["top"] + circle["scaleY"] * circle["radius"]))
-            r = int(round(circle["scaleX"] * circle["radius"]))
+            cx = int(round(circle["left"] + circle["radius"]))
+            cy = int(round(circle["top"] + circle["radius"]))
+            r = int(round(circle["radius"]))
             yy, xx = np.ogrid[:proc.shape[0], :proc.shape[1]]
             dist = (yy - cy)**2 + (xx - cx)**2
             mask = dist <= r**2
