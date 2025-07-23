@@ -63,6 +63,7 @@ if uploaded_files:
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         proc = preprocess_image(gray, invert, contrast)
         image_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        output_img = image_rgb.copy()
         pil_img = Image.fromarray(image_rgb)
 
         st.subheader(file.name)
@@ -100,8 +101,10 @@ if uploaded_files:
                 x, y = int(row['x']), int(row['y'])
                 if 0 <= y < mask.shape[0] and 0 <= x < mask.shape[1] and mask[y, x]:
                     inside.append((x, y))
+                    cv2.circle(output_img, (x, y), diameter // 2, (0, 255, 0), 1)
+                    cv2.circle(output_img, (x, y), 2, (255, 0, 0), -1)
 
-        st.write(f"Detected plaques inside dish: {len(inside)}")
+        st.image(output_img, caption=f"Detected plaques: {len(inside)}", use_column_width=True)
 
         # Update CSV log
         st.session_state.plaque_log = st.session_state.plaque_log[st.session_state.plaque_log.image_title != file.name]
