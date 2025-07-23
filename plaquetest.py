@@ -63,7 +63,7 @@ if uploaded_files:
     proc = preprocess_image(gray, invert, contrast)
     image_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-    draw_mode = st.selectbox("Drawing mode", ["circle"])
+    draw_mode = st.selectbox("Drawing mode", ["transform", "circle"])
     st.subheader(selected_name)
 
     canvas_result = st_canvas(
@@ -84,9 +84,9 @@ if uploaded_files:
     if canvas_result.json_data is not None and len(canvas_result.json_data["objects"]) > 0:
         circle = canvas_result.json_data["objects"][0]
         if circle["type"] == "circle":
-            cx = int(round(circle["left"] + circle["width"] / 2))
-            cy = int(round(circle["top"] + circle["height"] / 2))
-            r = int(round(circle["width"] / 2))
+            cx = int(round(circle["left"] + circle["scaleX"] * circle["radius"]))
+            cy = int(round(circle["top"] + circle["scaleY"] * circle["radius"]))
+            r = int(round(circle["scaleX"] * circle["radius"]))
             yy, xx = np.ogrid[:proc.shape[0], :proc.shape[1]]
             dist = (yy - cy)**2 + (xx - cx)**2
             mask = dist <= r**2
