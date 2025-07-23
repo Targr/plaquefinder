@@ -14,7 +14,6 @@ st.title("Interactive Plaque Counter")
 uploaded_files = st.file_uploader("Upload plaque images", type=["png", "jpg", "jpeg", "tif"], accept_multiple_files=True)
 invert = st.checkbox("Invert image", value=True)
 contrast = st.checkbox("Apply contrast stretch", value=True)
-invert_detection = st.checkbox("Invert detection area logic", value=False)
 
 # Detection parameters
 diameter = st.slider("Feature Diameter", 5, 50, 15, 1)
@@ -64,7 +63,7 @@ if uploaded_files:
     proc = preprocess_image(gray, invert, contrast)
     image_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-    draw_mode = st.selectbox("Drawing mode", ["transform", "circle", "rect", "line", "freedraw", "polygon"])
+    draw_mode = st.selectbox("Drawing mode", ["circle"])
     st.subheader(selected_name)
 
     canvas_result = st_canvas(
@@ -79,25 +78,20 @@ if uploaded_files:
         key=f"canvas_{selected_name}"
     )
 
-    # Default to full image unless a mask is drawn
+    # Default to full image unless a circle is drawn
     mask = np.zeros(proc.shape, dtype=bool)
 
     if canvas_result.json_data is not None and len(canvas_result.json_data["objects"]) > 0:
-        for obj in canvas_result.json_data["objects"]:
-            if obj["type"] == "circle":
-                cx = int(obj["left"] + obj["radius"])
-                cy = int(obj["top"] + obj["radius"])
-                r = int(obj["radius"])
-                yy, xx = np.ogrid[:proc.shape[0], :proc.shape[1]]
-                dist = (yy - cy)**2 + (xx - cx)**2
-                region = dist <= r**2
-                if invert_detection:
-                    mask = np.logical_or(mask, ~region)
-                else:
-                    mask = np.logical_or(mask, region)
+        circle = canvas_result.json_data["objects"][0]
+        if circle["type"] == "circle":
+            cx = int(circle["left"] + circle["radius"])
+            cy = int(circle["top"] + circle["radius"])
+            r = int(circle["radius"])
+            yy, xx = np.ogrid[:proc.shape[0], :proc.shape[1]]
+            dist = (yy - cy)**2 + (xx - cx)**2
+            mask = dist <= r**2
     else:
-        # No drawing: use entire image as detection region
-        mask = np.ones(proc.shape, dtype=bool)
+        st.warning("Draw a circle to define the region of interest.")
 
     st.image(mask.astype(np.uint8)*255, caption="Detection Mask")
 
