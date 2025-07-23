@@ -7,7 +7,6 @@ from PIL import Image
 import trackpy as tp
 
 st.set_page_config(layout="wide")
-
 st.title("Interactive Plaque Counter")
 
 # === Image Uploader ===
@@ -78,8 +77,10 @@ if uploaded_files:
         key=f"canvas_{selected_name}"
     )
 
-    # Default to full image unless a circle is drawn
-    mask = np.zeros(proc.shape, dtype=bool)
+    # Crop the processed image if circle is drawn
+    roi_img = proc  # default: full image
+    region_defined = False
+    x_offset, y_offset = 0, 0
 
     if canvas_result.json_data is not None and len(canvas_result.json_data["objects"]) > 0:
         circle = canvas_result.json_data["objects"][0]
@@ -87,31 +88,33 @@ if uploaded_files:
             cx = int(round(circle["left"] + circle["radius"]))
             cy = int(round(circle["top"] + circle["radius"]))
             r = int(round(circle["radius"]))
-            yy, xx = np.ogrid[:proc.shape[0], :proc.shape[1]]
-            dist = (yy - cy)**2 + (xx - cx)**2
-            mask = dist <= r**2
+            y1, y2 = max(0, cy - r), min(proc.shape[0], cy + r)
+            x1, x2 = max(0, cx - r), min(proc.shape[1], cx + r)
+            roi_img = proc[y1:y2, x1:x2].copy()
+            x_offset, y_offset = x1, y1
+            region_defined = True
+        else:
+            st.warning("Draw a circle to define the region of interest.")
     else:
         st.warning("Draw a circle to define the region of interest.")
 
-    st.image(mask.astype(np.uint8)*255, caption="Detection Mask")
+    # Run detection on the cropped image
+    features = detect_features(roi_img, diameter, minmass, separation, confidence)
+    st.text(f"Total features found in ROI: {len(features)}")
 
-    features = detect_features(proc, diameter, minmass, separation, confidence)
-    st.text(f"Total features found before mask: {len(features)}")
-
-    inside = []
-    display_img = image_rgb.copy()
+    # Draw results on the cropped image
+    display_img = cv2.cvtColor(roi_img, cv2.COLOR_GRAY2RGB)
     if not features.empty:
         for _, row in features.iterrows():
             x, y = int(round(row['x'])), int(round(row['y']))
-            if 0 <= y < mask.shape[0] and 0 <= x < mask.shape[1] and mask[y, x]:
-                inside.append((x, y))
-                cv2.circle(display_img, (x, y), diameter // 2, (0, 255, 0), 1)
-                cv2.circle(display_img, (x, y), 2, (255, 0, 0), -1)
+            cv2.circle(display_img, (x, y), diameter // 2, (0, 255, 0), 1)
+            cv2.circle(display_img, (x, y), 2, (255, 0, 0), -1)
 
-    st.image(display_img, caption=f"Detected plaques: {len(inside)}", use_column_width=True)
+    st.image(display_img, caption=f"Detected plaques: {len(features)}", use_column_width=True)
 
+    # Update log and export
     st.session_state.plaque_log = st.session_state.plaque_log[st.session_state.plaque_log.image_title != selected_name]
-    st.session_state.plaque_log.loc[len(st.session_state.plaque_log)] = [selected_name, len(inside)]
+    st.session_state.plaque_log.loc[len(st.session_state.plaque_log)] = [selected_name, len(features)]
 
     csv = st.session_state.plaque_log.to_csv(index=False).encode("utf-8")
     st.download_button("Download CSV", data=csv, file_name="plaque_counts.csv", mime="text/csv")
