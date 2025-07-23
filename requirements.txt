@@ -1,7 +1,7 @@
 streamlit>=1.35
-opencv-python-headless>=4.9.0
-matplotlib>=3.8.0
+streamlit-drawable-canvas>=0.9.2
+opencv-python-headless>=4.9.0.80
 numpy>=1.26
 pandas>=2.2
-trackpy>=0.5.0
+Pillow>=10.2
 scikit-image>=0.22
