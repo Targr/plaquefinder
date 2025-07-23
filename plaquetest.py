@@ -93,12 +93,17 @@ if uploaded_files:
                 else:
                     mask = np.logical_and(mask, dist <= r**2)
 
+    # Debug: Show mask
+    st.image(mask.astype(np.uint8)*255, caption="Detection Mask")
+
     features = detect_features(proc, diameter, minmass, separation, confidence)
+    st.text(f"Total features found before mask: {len(features)}")
+
     inside = []
     display_img = image_rgb.copy()
     if not features.empty:
         for _, row in features.iterrows():
-            x, y = int(row['x']), int(row['y'])
+            x, y = int(round(row['x'])), int(round(row['y']))
             if 0 <= y < mask.shape[0] and 0 <= x < mask.shape[1] and mask[y, x]:
                 inside.append((x, y))
                 cv2.circle(display_img, (x, y), diameter // 2, (0, 255, 0), 1)
