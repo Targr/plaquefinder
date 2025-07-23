@@ -3,7 +3,6 @@ from streamlit_drawable_canvas import st_canvas
 import cv2
 import numpy as np
 import pandas as pd
-import os
 from PIL import Image
 import trackpy as tp
 
@@ -53,62 +52,62 @@ def detect_features(gray_img, diameter, minmass, separation, confidence):
         features = pd.DataFrame()
     return features
 
-# === Main Loop ===
+# === Single Image Viewer ===
 if uploaded_files:
+    file_names = [file.name for file in uploaded_files]
+    selected_name = st.selectbox("Select image to analyze", file_names)
+    selected_file = next(file for file in uploaded_files if file.name == selected_name)
+
+    file_bytes = np.asarray(bytearray(selected_file.read()), dtype=np.uint8)
+    img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    proc = preprocess_image(gray, invert, contrast)
+    image_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
     draw_mode = st.selectbox("Drawing mode", ["transform", "circle", "rect", "line", "freedraw", "polygon"])
+    st.subheader(selected_name)
 
-    for file in uploaded_files:
-        file_bytes = np.asarray(bytearray(file.read()), dtype=np.uint8)
-        img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        proc = preprocess_image(gray, invert, contrast)
-        image_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    canvas_result = st_canvas(
+        fill_color="rgba(0, 255, 0, 0.3)",
+        stroke_width=2,
+        stroke_color="green",
+        background_image=Image.fromarray(image_rgb),
+        update_streamlit=True,
+        height=img.shape[0],
+        width=img.shape[1],
+        drawing_mode=draw_mode,
+        key=f"canvas_{selected_name}"
+    )
 
-        st.subheader(file.name)
-        canvas_result = st_canvas(
-            fill_color="rgba(0, 255, 0, 0.3)",
-            stroke_width=2,
-            stroke_color="green",
-            background_image=Image.fromarray(image_rgb),
-            update_streamlit=True,
-            height=img.shape[0],
-            width=img.shape[1],
-            drawing_mode=draw_mode,
-            key=f"canvas_{file.name}"
-        )
+    mask = np.ones(proc.shape, dtype=bool)
+    if canvas_result.json_data is not None:
+        for obj in canvas_result.json_data["objects"]:
+            if obj["type"] == "circle":
+                cx = int(obj["left"] + obj["radius"])
+                cy = int(obj["top"] + obj["radius"])
+                r = int(obj["radius"])
+                yy, xx = np.ogrid[:proc.shape[0], :proc.shape[1]]
+                dist = (yy - cy)**2 + (xx - cx)**2
+                if invert_detection:
+                    mask = np.logical_and(mask, dist > r**2)
+                else:
+                    mask = np.logical_and(mask, dist <= r**2)
 
-        mask = np.ones(proc.shape, dtype=bool)
+    features = detect_features(proc, diameter, minmass, separation, confidence)
+    inside = []
+    display_img = image_rgb.copy()
+    if not features.empty:
+        for _, row in features.iterrows():
+            x, y = int(row['x']), int(row['y'])
+            if 0 <= y < mask.shape[0] and 0 <= x < mask.shape[1] and mask[y, x]:
+                inside.append((x, y))
+                cv2.circle(display_img, (x, y), diameter // 2, (0, 255, 0), 1)
+                cv2.circle(display_img, (x, y), 2, (255, 0, 0), -1)
 
-        if canvas_result.json_data is not None:
-            for obj in canvas_result.json_data["objects"]:
-                if obj["type"] == "circle":
-                    cx = int(obj["left"] + obj["radius"])
-                    cy = int(obj["top"] + obj["radius"])
-                    r = int(obj["radius"])
-                    yy, xx = np.ogrid[:proc.shape[0], :proc.shape[1]]
-                    dist = (yy - cy)**2 + (xx - cx)**2
-                    if invert_detection:
-                        mask = np.logical_and(mask, dist > r**2)
-                    else:
-                        mask = np.logical_and(mask, dist <= r**2)
+    st.image(display_img, caption=f"Detected plaques: {len(inside)}", use_column_width=True)
 
-        features = detect_features(proc, diameter, minmass, separation, confidence)
-        inside = []
-        display_img = image_rgb.copy()
-        if not features.empty:
-            for _, row in features.iterrows():
-                x, y = int(row['x']), int(row['y'])
-                if 0 <= y < mask.shape[0] and 0 <= x < mask.shape[1] and mask[y, x]:
-                    inside.append((x, y))
-                    cv2.circle(display_img, (x, y), diameter // 2, (0, 255, 0), 1)
-                    cv2.circle(display_img, (x, y), 2, (255, 0, 0), -1)
+    st.session_state.plaque_log = st.session_state.plaque_log[st.session_state.plaque_log.image_title != selected_name]
+    st.session_state.plaque_log.loc[len(st.session_state.plaque_log)] = [selected_name, len(inside)]
 
-        st.image(display_img, caption=f"Detected plaques: {len(inside)}", use_column_width=True)
-
-        # Update CSV log
-        st.session_state.plaque_log = st.session_state.plaque_log[st.session_state.plaque_log.image_title != file.name]
-        st.session_state.plaque_log.loc[len(st.session_state.plaque_log)] = [file.name, len(inside)]
-
-    # === CSV Download ===
     csv = st.session_state.plaque_log.to_csv(index=False).encode("utf-8")
     st.download_button("Download CSV", data=csv, file_name="plaque_counts.csv", mime="text/csv")
