@@ -79,8 +79,10 @@ if uploaded_files:
         key=f"canvas_{selected_name}"
     )
 
-    mask = np.ones(proc.shape, dtype=bool)
-    if canvas_result.json_data is not None:
+    # Default to full image unless a mask is drawn
+    mask = np.zeros(proc.shape, dtype=bool)
+
+    if canvas_result.json_data is not None and len(canvas_result.json_data["objects"]) > 0:
         for obj in canvas_result.json_data["objects"]:
             if obj["type"] == "circle":
                 cx = int(obj["left"] + obj["radius"])
@@ -88,12 +90,15 @@ if uploaded_files:
                 r = int(obj["radius"])
                 yy, xx = np.ogrid[:proc.shape[0], :proc.shape[1]]
                 dist = (yy - cy)**2 + (xx - cx)**2
+                region = dist <= r**2
                 if invert_detection:
-                    mask = np.logical_and(mask, dist > r**2)
+                    mask = np.logical_or(mask, ~region)
                 else:
-                    mask = np.logical_and(mask, dist <= r**2)
+                    mask = np.logical_or(mask, region)
+    else:
+        # No drawing: use entire image as detection region
+        mask = np.ones(proc.shape, dtype=bool)
 
-    # Debug: Show mask
     st.image(mask.astype(np.uint8)*255, caption="Detection Mask")
 
     features = detect_features(proc, diameter, minmass, separation, confidence)
