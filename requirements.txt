@@ -1,9 +1,6 @@
-streamlit
-opencv
-numpy
-pandas
-os
-glob
-tempfile
-PIL
-Image
+streamlit>=1.35
+opencv-python-headless>=4.9.0
+matplotlib>=3.8.0
+numpy>=1.26
+pandas>=2.2
+trackpy>=0.5.0
