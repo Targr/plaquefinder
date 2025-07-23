@@ -64,7 +64,7 @@ if uploaded_files:
         proc = preprocess_image(gray, invert, contrast)
         image_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         output_img = image_rgb.copy()
-        pil_img = Image.fromarray(image_rgb)
+        pil_img = Image.fromarray(output_img)
 
         st.subheader(file.name)
         canvas_result = st_canvas(
