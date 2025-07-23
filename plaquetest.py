@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import os
 from PIL import Image
-from skimage.feature import blob_log
+import trackpy as tp
 
 st.set_page_config(layout="wide")
 
@@ -15,6 +15,13 @@ st.title("Interactive Plaque Counter")
 uploaded_files = st.file_uploader("Upload plaque images", type=["png", "jpg", "jpeg", "tif"], accept_multiple_files=True)
 invert = st.checkbox("Invert image", value=True)
 contrast = st.checkbox("Apply contrast stretch", value=True)
+invert_detection = st.checkbox("Invert detection area logic", value=False)
+
+# Detection parameters
+diameter = st.slider("Feature Diameter", 5, 50, 15, 1)
+minmass = st.slider("Minimum Mass", 1, 100, 10, 1)
+separation = st.slider("Minimum Separation", 1, 30, 5, 1)
+confidence = st.slider("Percentile Confidence to Keep", 0, 100, 90, 1)
 
 # Global plaque log
 def reset_log():
@@ -28,19 +35,26 @@ def preprocess_image(img, invert=False, contrast=False):
     if invert:
         img = cv2.bitwise_not(img)
     if contrast:
-        p2, p98 = np.percentile(img, (2, 98))
-        img = np.clip((img - p2) * 255.0 / (p98 - p2), 0, 255).astype(np.uint8)
+        img = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX)
     return img
 
-def detect_features(gray_img, diameter):
+def detect_features(gray_img, diameter, minmass, separation, confidence):
     norm_img = (gray_img / 255.0).astype(np.float32)
-    blobs = blob_log(norm_img, min_sigma=diameter/4, max_sigma=diameter/2, num_sigma=10, threshold=0.03)
-    positions = blobs[:, :2][:, ::-1] if len(blobs) else np.empty((0, 2))
-    return positions
+    try:
+        features = tp.locate(
+            norm_img,
+            diameter=diameter,
+            minmass=minmass,
+            separation=separation,
+            percentile=confidence,
+            invert=False
+        )
+    except Exception:
+        features = pd.DataFrame()
+    return features
 
 # === Main Loop ===
 if uploaded_files:
-    diameter = st.slider("Feature Diameter", 5, 50, 15, 1)
     draw_mode = st.selectbox("Drawing mode", ["transform", "circle", "rect", "line", "freedraw", "polygon"])
 
     for file in uploaded_files:
@@ -74,17 +88,19 @@ if uploaded_files:
                     r = int(obj["radius"])
                     yy, xx = np.ogrid[:proc.shape[0], :proc.shape[1]]
                     dist = (yy - cy)**2 + (xx - cx)**2
-                    mask = dist <= r**2
+                    if invert_detection:
+                        mask = np.logical_and(mask, dist > r**2)
+                    else:
+                        mask = np.logical_and(mask, dist <= r**2)
 
-        features = detect_features(proc, diameter)
+        features = detect_features(proc, diameter, minmass, separation, confidence)
         inside = []
-        for f in features:
-            x, y = int(f[0]), int(f[1])
-            if 0 <= y < mask.shape[0] and 0 <= x < mask.shape[1] and mask[y, x]:
-                inside.append(f)
-        inside = np.array(inside)
+        if not features.empty:
+            for _, row in features.iterrows():
+                x, y = int(row['x']), int(row['y'])
+                if 0 <= y < mask.shape[0] and 0 <= x < mask.shape[1] and mask[y, x]:
+                    inside.append((x, y))
 
-        st.image(proc, caption=f"Preprocessed: {file.name}", use_column_width=True, channels="GRAY")
         st.write(f"Detected plaques inside dish: {len(inside)}")
 
         # Update CSV log
