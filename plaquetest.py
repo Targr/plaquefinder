@@ -72,8 +72,8 @@ if uploaded_files:
         stroke_color="green",
         background_image=Image.fromarray(image_rgb),
         update_streamlit=True,
-        height=img.shape[0],
-        width=img.shape[1],
+        height=image_rgb.shape[0],
+        width=image_rgb.shape[1],
         drawing_mode=draw_mode,
         key=f"canvas_{selected_name}"
     )
@@ -84,9 +84,9 @@ if uploaded_files:
     if canvas_result.json_data is not None and len(canvas_result.json_data["objects"]) > 0:
         circle = canvas_result.json_data["objects"][0]
         if circle["type"] == "circle":
-            cx = int(circle["left"] + circle["radius"])
-            cy = int(circle["top"] + circle["radius"])
-            r = int(circle["radius"])
+            cx = int(round(circle["left"] + circle["width"] / 2))
+            cy = int(round(circle["top"] + circle["height"] / 2))
+            r = int(round(circle["width"] / 2))
             yy, xx = np.ogrid[:proc.shape[0], :proc.shape[1]]
             dist = (yy - cy)**2 + (xx - cx)**2
             mask = dist <= r**2
