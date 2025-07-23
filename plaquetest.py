@@ -41,6 +41,8 @@ def detect_features(gray_img, diameter):
 # === Main Loop ===
 if uploaded_files:
     diameter = st.slider("Feature Diameter", 5, 50, 15, 1)
+    draw_mode = st.selectbox("Drawing mode", ["transform", "circle", "rect", "line", "freedraw", "polygon"])
+
     for file in uploaded_files:
         file_bytes = np.asarray(bytearray(file.read()), dtype=np.uint8)
         img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
@@ -58,7 +60,7 @@ if uploaded_files:
             update_streamlit=True,
             height=img.shape[0],
             width=img.shape[1],
-            drawing_mode="circle",
+            drawing_mode=draw_mode,
             key=f"canvas_{file.name}"
         )
 
