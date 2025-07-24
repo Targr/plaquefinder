@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 from PIL import Image
 import trackpy as tp
+import io
 
 st.set_page_config(layout="wide")
 st.title("Interactive Plaque Counter (Canvas-Aligned)")
@@ -88,9 +89,20 @@ if uploaded_files:
     selected_name = st.selectbox("Select image", file_names)
     selected_file = next(file for file in uploaded_files if file.name == selected_name)
 
-    # Load + preprocess
-    file_bytes = np.asarray(bytearray(selected_file.read()), dtype=np.uint8)
-    img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+    # Shrink if too large
+    selected_file.seek(0, io.SEEK_END)
+    file_size = selected_file.tell()
+    selected_file.seek(0)
+    file_bytes = bytearray(selected_file.read())
+
+    while file_size > 1 * 1024 * 1024:  # >1MB
+        img_tmp = cv2.imdecode(np.frombuffer(file_bytes, np.uint8), cv2.IMREAD_COLOR)
+        img_tmp = cv2.resize(img_tmp, None, fx=0.75, fy=0.75, interpolation=cv2.INTER_AREA)
+        is_success, buffer = cv2.imencode(".jpg", img_tmp, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+        file_bytes = buffer.tobytes()
+        file_size = len(file_bytes)
+
+    img = cv2.imdecode(np.frombuffer(file_bytes, np.uint8), cv2.IMREAD_COLOR)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     proc = preprocess_image(gray, invert, contrast)
     image_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
