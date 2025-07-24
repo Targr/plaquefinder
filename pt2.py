@@ -124,12 +124,12 @@ if uploaded_files:
         cv2.circle(det_img, (x, y), 2, (255, 0, 0), -1)
 
         def resize_for_display(image, max_width=1000):
-        h, w = image.shape[:2]
-        if w > max_width:
-        scale = max_width / w
-        new_w, new_h = int(w * scale), int(h * scale)
-        return cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
-        return image
+            h, w = image.shape[:2]
+            if w > max_width:
+            scale = max_width / w
+            new_w, new_h = int(w * scale), int(h * scale)
+            return cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            return image
 
     # Resize before display
     display_overlay_resized = resize_for_display(display_overlay)
