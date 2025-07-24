@@ -15,7 +15,7 @@ invert = st.checkbox("Invert image", value=True)
 contrast = st.checkbox("Apply contrast stretch", value=True)
 
 # Detection parameters
-diameter = st.slider("Feature Diameter", 5, 50, 15, 1)
+diameter = st.slider("Feature Diameter", 5, 51, 15, 2)
 minmass = st.slider("Minimum Mass", 1, 100, 10, 1)
 separation = st.slider("Minimum Separation", 1, 30, 5, 1)
 confidence = st.slider("Percentile Confidence to Keep", 0, 100, 90, 1)
