@@ -104,9 +104,9 @@ if uploaded_files:
 
     # Auto-tune detection parameters based on number of dishes
     scale_factor = 1.0 / num_dishes
-    auto_diameter = max(5, int(diameter * scale_factor))
-    auto_separation = max(1, int(separation * scale_factor))
-    auto_minmass = max(1, int(minmass * scale_factor))
+    auto_diameter = max(3, int(diameter * scale_factor * 0.8))
+    auto_separation = max(1, int(separation * scale_factor * 0.8))
+    auto_minmass = max(1, int(minmass * scale_factor * 0.5))
 
     canvas_bg_resized, canvas_scale = resize_with_scale(image_rgb)
 
