@@ -102,12 +102,18 @@ if uploaded_files:
     proc = preprocess_image(gray, invert, contrast)
     image_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
+    # Auto-tune detection parameters based on number of dishes
+    scale_factor = 1.0 / num_dishes
+    auto_diameter = max(5, int(diameter * scale_factor))
+    auto_separation = max(1, int(separation * scale_factor))
+    auto_minmass = max(1, int(minmass * scale_factor))
+
     canvas_bg_resized, canvas_scale = resize_with_scale(image_rgb)
 
     st.subheader(selected_name)
 
     display_overlay = image_rgb.copy()
-    features = detect_features(proc, diameter, minmass, separation, confidence)
+    features = detect_features(proc, auto_diameter, auto_minmass, auto_separation, confidence)
     if features is None or features.empty:
         features = pd.DataFrame(columns=["x", "y"])
 
@@ -120,7 +126,7 @@ if uploaded_files:
 
         for _, row in dish_feats.iterrows():
             x, y = int(round(row["x"])), int(round(row["y"]))
-            cv2.circle(display_overlay, (x, y), diameter // 2, (0, 255, 0), 1)
+            cv2.circle(display_overlay, (x, y), auto_diameter // 2, (0, 255, 0), 1)
             cv2.circle(display_overlay, (x, y), 2, (255, 0, 0), -1)
 
         plaque_count = len(dish_feats)
