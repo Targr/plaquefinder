@@ -89,20 +89,16 @@ if uploaded_files:
     selected_name = st.selectbox("Select image", file_names)
     selected_file = next(file for file in uploaded_files if file.name == selected_name)
 
-    # Shrink if too large
-    selected_file.seek(0, io.SEEK_END)
-    file_size = selected_file.tell()
-    selected_file.seek(0)
+    # Load and optionally compress the image
     file_bytes = bytearray(selected_file.read())
+    img_np = np.frombuffer(file_bytes, np.uint8)
+    img = cv2.imdecode(img_np, cv2.IMREAD_COLOR)
 
-    while file_size > 1 * 1024 * 1024:  # >1MB
-        img_tmp = cv2.imdecode(np.frombuffer(file_bytes, np.uint8), cv2.IMREAD_COLOR)
-        img_tmp = cv2.resize(img_tmp, None, fx=0.75, fy=0.75, interpolation=cv2.INTER_AREA)
-        is_success, buffer = cv2.imencode(".jpg", img_tmp, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
-        file_bytes = buffer.tobytes()
-        file_size = len(file_bytes)
+    # Resize down if the image exceeds 1MB in raw pixels (approx)
+    while img.nbytes > 1_000_000:
+        h, w = img.shape[:2]
+        img = cv2.resize(img, (int(w * 0.8), int(h * 0.8)), interpolation=cv2.INTER_AREA)
 
-    img = cv2.imdecode(np.frombuffer(file_bytes, np.uint8), cv2.IMREAD_COLOR)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     proc = preprocess_image(gray, invert, contrast)
     image_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
