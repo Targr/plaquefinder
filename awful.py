@@ -1,78 +1,76 @@
 import streamlit as st
-import cv2
 import numpy as np
+import pandas as pd
 from PIL import Image
-import io
+import cv2
+import trackpy as tp
+from io import BytesIO
 
 st.set_page_config(layout="wide")
-st.title("Tiny Plaque Detector with Per-Dish Counts")
+st.title("Plaque Counter Using Trackpy with Manual Plate Count")
 
-uploaded_file = st.file_uploader("Upload Petri Dish Image", type=["jpg", "jpeg", "png", "tif"])
+# === Upload image ===
+uploaded_file = st.file_uploader("Upload image of plates", type=["jpg", "jpeg", "png", "tif"])
+num_plates = st.number_input("How many plates are in the image?", min_value=1, max_value=10, value=5)
 
 if uploaded_file:
-    image = Image.open(uploaded_file).convert("RGB")
+    # Load and display image
+    image = Image.open(uploaded_file).convert("L")  # grayscale
     img_array = np.array(image)
-    original_copy = img_array.copy()
-    st.image(image, caption="Original Image", use_column_width=True)
 
-    # Convert to grayscale
-    gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+    st.image(image, caption="Uploaded Image", use_column_width=True)
 
-    # Detect dishes using Hough Circles
-    blurred_gray = cv2.medianBlur(gray, 9)
-    circles = cv2.HoughCircles(blurred_gray, cv2.HOUGH_GRADIENT, dp=1.2, minDist=200,
-                               param1=100, param2=30, minRadius=150, maxRadius=300)
+    # === Detect circular plates using HoughCircles ===
+    img_blur = cv2.medianBlur(img_array, 5)
+    circles = cv2.HoughCircles(img_blur, cv2.HOUGH_GRADIENT, dp=1.2, minDist=150,
+                               param1=50, param2=30, minRadius=100, maxRadius=300)
 
-    if circles is not None:
-        circles = np.uint16(np.around(circles))
-        dish_counts = []
-
-        for i, (x, y, r) in enumerate(circles[0, :], start=1):
-            # Extract ROI
-            mask = np.zeros_like(gray)
-            cv2.circle(mask, (x, y), r, 255, -1)
-            roi = cv2.bitwise_and(gray, gray, mask=mask)
-            roi_color = cv2.bitwise_and(original_copy, original_copy, mask=mask)
-
-            # Enhance contrast
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-            enhanced = clahe.apply(roi)
-
-            # Invert and blur
-            inv = 255 - enhanced
-            blur = cv2.GaussianBlur(inv, (7, 7), 0)
-
-            # Threshold
-            _, thresh = cv2.threshold(blur, 160, 255, cv2.THRESH_BINARY)
-
-            # Blob detection
-            params = cv2.SimpleBlobDetector_Params()
-            params.filterByArea = True
-            params.minArea = 5
-            params.maxArea = 150
-            params.filterByCircularity = True
-            params.minCircularity = 0.2
-            params.filterByInertia = False
-            params.filterByConvexity = False
-            detector = cv2.SimpleBlobDetector_create(params)
-            keypoints = detector.detect(thresh)
-
-            # Draw detected plaques as green circles
-            for kp in keypoints:
-                cx, cy = int(kp.pt[0]), int(kp.pt[1])
-                if (cx - x)**2 + (cy - y)**2 <= r**2:  # Stay within the dish
-                    cv2.circle(original_copy, (cx, cy), int(kp.size/2), (0, 255, 0), 1)
-
-            # Label dish with plaque count
-            cv2.putText(original_copy, f"D{i}: {len(keypoints)}", (x - 50, y), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
-
-            dish_counts.append((f"Dish {i}", len(keypoints)))
-
-        st.image(original_copy, caption="Detected Plaques per Dish", use_column_width=True)
-
-        st.subheader("Plaque Counts Per Dish")
-        for label, count in dish_counts:
-            st.write(f"{label}: {count} plaques")
+    if circles is None or len(circles[0]) < num_plates:
+        st.warning("Detected fewer plates than expected. Try adjusting image quality or count.")
     else:
-        st.error("No dishes detected. Try adjusting the image or lighting.")
+        circles = np.uint16(np.around(circles[0]))
+        # Sort by y (then x) to stabilize plate ordering
+        circles = sorted(circles, key=lambda c: (c[1], c[0]))[:num_plates]
+
+        results = []
+        output_rgb = cv2.cvtColor(img_array, cv2.COLOR_GRAY2BGR)
+
+        for i, (x, y, r) in enumerate(circles):
+            # Crop circular ROI
+            mask = np.zeros_like(img_array)
+            cv2.circle(mask, (x, y), r, 255, -1)
+            roi = cv2.bitwise_and(img_array, img_array, mask=mask)
+
+            # Extract bounding box for ROI to reduce trackpy load
+            x1, x2 = max(0, x - r), min(img_array.shape[1], x + r)
+            y1, y2 = max(0, y - r), min(img_array.shape[0], y + r)
+            roi_crop = roi[y1:y2, x1:x2]
+
+            # Normalize ROI for trackpy (optional, enhances light plaques)
+            roi_norm = (roi_crop - np.min(roi_crop)) / (np.max(roi_crop) - np.min(roi_crop) + 1e-8)
+            roi_norm = (roi_norm * 255).astype(np.uint8)
+
+            # Detect bright spots (plaques)
+            f = tp.locate(roi_norm, diameter=7, minmass=30, invert=False)
+
+            # Offset to global image coords
+            f['x'] += x1
+            f['y'] += y1
+
+            # Draw plaques
+            for _, row in f.iterrows():
+                cx, cy = int(row['x']), int(row['y'])
+                cv2.circle(output_rgb, (cx, cy), 4, (0, 255, 0), 1)
+
+            # Label plate
+            cv2.putText(output_rgb, f"P{i+1}: {len(f)}", (x - 50, y), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.7, (255, 0, 0), 2)
+
+            results.append((f"Plate {i+1}", len(f)))
+
+        # === Output ===
+        st.image(output_rgb, caption="Detected Plaques per Plate", use_column_width=True)
+
+        st.subheader("Plaque Counts Per Plate")
+        for plate_label, count in results:
+            st.write(f"{plate_label}: {count} plaques")
