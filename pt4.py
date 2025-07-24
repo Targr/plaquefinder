@@ -23,7 +23,7 @@ confidence = st.slider("Percentile Confidence to Keep", 0, 100, 90, 1)
 
 # Global log
 def reset_log():
-    return pd.DataFrame(columns=["image_title", "num_plaques"])
+    return pd.DataFrame(columns=["image_title", "dish_index", "num_plaques"])
 
 if "plaque_log" not in st.session_state:
     st.session_state.plaque_log = reset_log()
@@ -60,17 +60,16 @@ def resize_with_scale(image, max_width=1000):
         return resized, scale
     return image, 1.0
 
-def detect_dish_edge(gray):
+def detect_multiple_dishes(gray):
     circles = cv2.HoughCircles(
         gray, cv2.HOUGH_GRADIENT, dp=1.2, minDist=100,
         param1=50, param2=30,
-        minRadius=int(min(gray.shape[:2]) * 0.4),
+        minRadius=int(min(gray.shape[:2]) * 0.15),
         maxRadius=int(min(gray.shape[:2]) * 0.6)
     )
     if circles is not None:
-        x, y, r = circles[0][0]
-        return int(x), int(y), int(r)
-    return None
+        return np.round(circles[0]).astype(int)
+    return []
 
 def ellipse_mask_filter(features, cx, cy, rx, ry, angle_deg):
     angle_rad = np.deg2rad(angle_deg)
@@ -110,25 +109,25 @@ if uploaded_files:
 
     display_overlay = image_rgb.copy()
     total_features = 0
+    dish_circles = detect_multiple_dishes(gray)
 
-    # Detect single dish
-    dish_circle = detect_dish_edge(gray)
-    if dish_circle:
-        cx, cy, cr = dish_circle
+    dish_counts = []
+    features = detect_features(proc, diameter, minmass, separation, confidence)
+
+    for i, (cx, cy, cr) in enumerate(dish_circles):
         rx = int(cr * 0.95)
         ry = int(cr * 0.95)
         cv2.ellipse(display_overlay, (cx, cy), (rx, ry), 0, 0, 360, (255, 0, 0), 2)
 
-        # Run detection inside elliptical mask
-        features = detect_features(proc, diameter, minmass, separation, confidence)
         if features is not None and not features.empty:
-            features = ellipse_mask_filter(features, cx, cy, rx, ry, angle_deg=0)
+            f_masked = ellipse_mask_filter(features, cx, cy, rx, ry, angle_deg=0)
         else:
-            features = pd.DataFrame(columns=["x", "y"])
+            f_masked = pd.DataFrame(columns=["x", "y"])
 
-        total_features = len(features)
+        total_features += len(f_masked)
+        dish_counts.append((i+1, len(f_masked)))
 
-        for _, row in features.iterrows():
+        for _, row in f_masked.iterrows():
             x, y = int(round(row["x"])), int(round(row["y"]))
             cv2.circle(display_overlay, (x, y), diameter // 2, (0, 255, 0), 1)
             cv2.circle(display_overlay, (x, y), 2, (255, 0, 0), -1)
@@ -136,8 +135,10 @@ if uploaded_files:
     display_overlay_resized, _ = resize_with_scale(display_overlay)
     st.image(display_overlay_resized, caption=f"Detected plaques: {total_features}")
 
+    # Update log
     st.session_state.plaque_log = st.session_state.plaque_log[st.session_state.plaque_log.image_title != selected_name]
-    st.session_state.plaque_log.loc[len(st.session_state.plaque_log)] = [selected_name, total_features]
+    for dish_index, count in dish_counts:
+        st.session_state.plaque_log.loc[len(st.session_state.plaque_log)] = [selected_name, dish_index, count]
 
     csv = st.session_state.plaque_log.to_csv(index=False).encode("utf-8")
     st.download_button("Download CSV", data=csv, file_name="plaque_counts.csv", mime="text/csv")
