@@ -59,16 +59,28 @@ def resize_with_scale(image, max_width=1000):
         return resized, scale
     return image, 1.0
 
-def find_plate_regions(gray_img):
-    blurred = cv2.GaussianBlur(gray_img, (9, 9), 2)
+def detect_dish_edge(gray):
     circles = cv2.HoughCircles(
-        blurred, cv2.HOUGH_GRADIENT, dp=1.2, minDist=gray_img.shape[0]//4,
-        param1=100, param2=60, minRadius=gray_img.shape[0]//10, maxRadius=0
+        gray, cv2.HOUGH_GRADIENT, dp=1.2, minDist=100,
+        param1=50, param2=30,
+        minRadius=int(min(gray.shape[:2]) * 0.4),
+        maxRadius=int(min(gray.shape[:2]) * 0.6)
     )
     if circles is not None:
-        circles = np.uint16(np.around(circles[0]))
-        return [(x, y, r) for x, y, r in circles]
-    return []
+        x, y, r = circles[0][0]
+        return int(x), int(y), int(r)
+    return None
+
+def ellipse_mask_filter(features, cx, cy, rx, ry, angle_deg):
+    angle_rad = np.deg2rad(angle_deg)
+    dx = features['x'] - cx
+    dy = features['y'] - cy
+
+    x_rot = dx * np.cos(angle_rad) + dy * np.sin(angle_rad)
+    y_rot = -dx * np.sin(angle_rad) + dy * np.cos(angle_rad)
+
+    inside = (x_rot / rx)**2 + (y_rot / ry)**2 <= 1
+    return features[inside]
 
 # === Main App ===
 if uploaded_files:
@@ -86,65 +98,30 @@ if uploaded_files:
     # Resize for canvas preview
     canvas_bg_resized, canvas_scale = resize_with_scale(image_rgb)
 
-    draw_mode = st.selectbox("Drawing mode", ["transform", "rect"])
     st.subheader(selected_name)
-
-    canvas_result = st_canvas(
-        fill_color="rgba(0, 255, 0, 0.3)",
-        stroke_width=2,
-        stroke_color="green",
-        background_image=Image.fromarray(canvas_bg_resized),
-        update_streamlit=True,
-        height=canvas_bg_resized.shape[0],
-        width=canvas_bg_resized.shape[1],
-        drawing_mode=draw_mode,
-        key=f"canvas_{selected_name}"
-    )
 
     display_overlay = image_rgb.copy()
     total_features = 0
-    regions = []
 
-    # Detect circular plate regions
-    plate_circles = find_plate_regions(gray)
-    for x, y, r in plate_circles:
-        pad_r = int(r * 0.85)
-        x1, y1 = max(0, x - pad_r), max(0, y - pad_r)
-        x2, y2 = min(proc.shape[1], x + pad_r), min(proc.shape[0], y + pad_r)
-        regions.append((x1, y1, x2, y2))
-        cv2.circle(display_overlay, (x, y), pad_r, (255, 0, 0), 2)
+    # Detect single dish
+    dish_circle = detect_dish_edge(gray)
+    if dish_circle:
+        cx, cy, cr = dish_circle
+        rx = int(cr * 0.95)
+        ry = int(cr * 0.95)
+        cv2.ellipse(display_overlay, (cx, cy), (rx, ry), 0, 0, 360, (255, 0, 0), 2)
 
-    # Add user rectangles
-    if canvas_result.json_data and canvas_result.json_data["objects"]:
-        for rect in canvas_result.json_data["objects"]:
-            if rect["type"] == "rect":
-                left = rect["left"] / canvas_scale
-                top = rect["top"] / canvas_scale
-                width = rect["width"] / canvas_scale
-                height = rect["height"] / canvas_scale
-
-                x1 = int(round(left))
-                y1 = int(round(top))
-                x2 = int(round(left + width))
-                y2 = int(round(top + height))
-
-                x1, y1 = max(0, x1), max(0, y1)
-                x2, y2 = min(proc.shape[1], x2), min(proc.shape[0], y2)
-
-                regions.append((x1, y1, x2, y2))
-
-    for x1, y1, x2, y2 in regions:
-        roi_img = proc[y1:y2, x1:x2].copy()
-        crop_bounds = (x1, y1)
-
-        features = detect_features(roi_img, diameter, minmass, separation, confidence)
-        if features is None or features.empty:
+        # Run detection inside elliptical mask
+        features = detect_features(proc, diameter, minmass, separation, confidence)
+        if features is not None and not features.empty:
+            features = ellipse_mask_filter(features, cx, cy, rx, ry, angle_deg=0)
+        else:
             features = pd.DataFrame(columns=["x", "y"])
 
-        total_features += len(features)
+        total_features = len(features)
 
         for _, row in features.iterrows():
-            x, y = int(round(row["x"] + crop_bounds[0])), int(round(row["y"] + crop_bounds[1]))
+            x, y = int(round(row["x"])), int(round(row["y"]))
             cv2.circle(display_overlay, (x, y), diameter // 2, (0, 255, 0), 1)
             cv2.circle(display_overlay, (x, y), 2, (255, 0, 0), -1)
 
