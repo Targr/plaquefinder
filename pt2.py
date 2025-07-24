@@ -15,7 +15,7 @@ invert = st.checkbox("Invert image", value=True)
 contrast = st.checkbox("Apply contrast stretch", value=True)
 
 # Detection parameters
-diameter = st.slider("Feature Diameter", 5, 50, 15, 1)
+diameter = st.slider("Feature Diameter", 5, 50, 15, 2)
 minmass = st.slider("Minimum Mass", 1, 100, 10, 1)
 separation = st.slider("Minimum Separation", 1, 30, 5, 1)
 confidence = st.slider("Percentile Confidence to Keep", 0, 100, 90, 1)
@@ -59,6 +59,19 @@ def resize_with_scale(image, max_width=1000):
         return resized, scale
     return image, 1.0
 
+def find_plate_regions(gray_img):
+    blurred = cv2.medianBlur(gray_img, 5)
+    circles = cv2.HoughCircles(
+        blurred, cv2.HOUGH_GRADIENT, dp=1.2, minDist=100,
+        param1=100, param2=50, minRadius=50, maxRadius=0
+    )
+    if circles is not None:
+        circles = np.uint16(np.around(circles[0]))
+        # Keep only the largest N circles (plates)
+        circles = sorted(circles, key=lambda c: c[2], reverse=True)[:5]
+        return [(x, y, r) for x, y, r in circles]
+    return []
+
 # === Main App ===
 if uploaded_files:
     file_names = [file.name for file in uploaded_files]
@@ -92,7 +105,18 @@ if uploaded_files:
 
     display_overlay = image_rgb.copy()
     total_features = 0
+    regions = []
 
+    # Detect default plate regions
+    plate_circles = find_plate_regions(gray)
+    for x, y, r in plate_circles:
+        pad = int(r * 0.9)
+        x1, y1 = max(0, x - pad), max(0, y - pad)
+        x2, y2 = min(proc.shape[1], x + pad), min(proc.shape[0], y + pad)
+        regions.append((x1, y1, x2, y2))
+        cv2.rectangle(display_overlay, (x1, y1), (x2, y2), (255, 0, 0), 2)
+
+    # Add user rectangles
     if canvas_result.json_data and canvas_result.json_data["objects"]:
         for rect in canvas_result.json_data["objects"]:
             if rect["type"] == "rect":
@@ -109,30 +133,28 @@ if uploaded_files:
                 x1, y1 = max(0, x1), max(0, y1)
                 x2, y2 = min(proc.shape[1], x2), min(proc.shape[0], y2)
 
-                roi_img = proc[y1:y2, x1:x2].copy()
-                crop_bounds = (x1, y1)
+                regions.append((x1, y1, x2, y2))
 
-                features = detect_features(roi_img, diameter, minmass, separation, confidence)
+    for x1, y1, x2, y2 in regions:
+        roi_img = proc[y1:y2, x1:x2].copy()
+        crop_bounds = (x1, y1)
 
-                if features is None or features.empty:
-                    features = pd.DataFrame(columns=["x", "y"])
+        features = detect_features(roi_img, diameter, minmass, separation, confidence)
+        if features is None or features.empty:
+            features = pd.DataFrame(columns=["x", "y"])
 
-                total_features += len(features)
+        total_features += len(features)
 
-                for _, row in features.iterrows():
-                    x, y = int(round(row["x"] + crop_bounds[0])), int(round(row["y"] + crop_bounds[1]))
-                    cv2.circle(display_overlay, (x, y), diameter // 2, (0, 255, 0), 1)
-                    cv2.circle(display_overlay, (x, y), 2, (255, 0, 0), -1)
+        for _, row in features.iterrows():
+            x, y = int(round(row["x"] + crop_bounds[0])), int(round(row["y"] + crop_bounds[1]))
+            cv2.circle(display_overlay, (x, y), diameter // 2, (0, 255, 0), 1)
+            cv2.circle(display_overlay, (x, y), 2, (255, 0, 0), -1)
 
-                cv2.rectangle(display_overlay, (x1, y1), (x2, y2), (0, 255, 0), 2)
+    display_overlay_resized, _ = resize_with_scale(display_overlay)
+    st.image(display_overlay_resized, caption=f"Detected plaques: {total_features}")
 
-        display_overlay_resized, _ = resize_with_scale(display_overlay)
-        st.image(display_overlay_resized, caption=f"Detected plaques: {total_features}")
+    st.session_state.plaque_log = st.session_state.plaque_log[st.session_state.plaque_log.image_title != selected_name]
+    st.session_state.plaque_log.loc[len(st.session_state.plaque_log)] = [selected_name, total_features]
 
-        st.session_state.plaque_log = st.session_state.plaque_log[st.session_state.plaque_log.image_title != selected_name]
-        st.session_state.plaque_log.loc[len(st.session_state.plaque_log)] = [selected_name, total_features]
-
-        csv = st.session_state.plaque_log.to_csv(index=False).encode("utf-8")
-        st.download_button("Download CSV", data=csv, file_name="plaque_counts.csv", mime="text/csv")
-    else:
-        st.warning("Draw one or more rectangles to define regions of interest.")
+    csv = st.session_state.plaque_log.to_csv(index=False).encode("utf-8")
+    st.download_button("Download CSV", data=csv, file_name="plaque_counts.csv", mime="text/csv")
