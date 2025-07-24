@@ -123,8 +123,20 @@ if uploaded_files:
         cv2.circle(det_img, (x, y), diameter // 2, (0, 255, 0), 1)
         cv2.circle(det_img, (x, y), 2, (255, 0, 0), -1)
 
-    st.image(display_overlay, caption="Original + ROI Overlay", use_column_width=True)
-    st.image(det_img, caption=f"Detected plaques: {len(features)}", use_column_width=True)
+    def resize_for_display(image, max_width=1000):
+    h, w = image.shape[:2]
+    if w > max_width:
+        scale = max_width / w
+        new_w, new_h = int(w * scale), int(h * scale)
+        return cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    return image
+
+    # Resize before display
+    display_overlay_resized = resize_for_display(display_overlay)
+    det_img_resized = resize_for_display(det_img)
+
+    st.image(display_overlay_resized, caption="Original + ROI Overlay")
+    st.image(det_img_resized, caption=f"Detected plaques: {len(features)}")
 
     # Log + Export
     st.session_state.plaque_log = st.session_state.plaque_log[st.session_state.plaque_log.image_title != selected_name]
