@@ -50,6 +50,14 @@ def detect_features(gray_img, diameter, minmass, separation, confidence):
         features = pd.DataFrame()
     return features
 
+def resize_for_display(image, max_width=1000):
+    h, w = image.shape[:2]
+    if w > max_width:
+        scale = max_width / w
+        new_w, new_h = int(w * scale), int(h * scale)
+        return cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    return image
+
 # === Main App ===
 if uploaded_files:
     file_names = [file.name for file in uploaded_files]
@@ -123,18 +131,11 @@ if uploaded_files:
         cv2.circle(det_img, (x, y), diameter // 2, (0, 255, 0), 1)
         cv2.circle(det_img, (x, y), 2, (255, 0, 0), -1)
 
-        def resize_for_display(image, max_width=1000):
-            h, w = image.shape[:2]
-            if w > max_width:
-                scale = max_width / w
-                new_w, new_h = int(w * scale), int(h * scale)
-                return cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
-                return image
-
-    # Resize before display
+    # Resize for display
     display_overlay_resized = resize_for_display(display_overlay)
     det_img_resized = resize_for_display(det_img)
 
+    # Show images
     st.image(display_overlay_resized, caption="Original + ROI Overlay")
     st.image(det_img_resized, caption=f"Detected plaques: {len(features)}")
 
