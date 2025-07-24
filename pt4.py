@@ -139,8 +139,8 @@ if uploaded_files:
     st.image(display_overlay_resized, caption="Detected plaques per dish")
 
     st.session_state.plaque_log = st.session_state.plaque_log[
-        ~((st.session_state.plaque_log.image_title == selected_name) &
-          (st.session_state.plaque_log.dish_id.str.startswith("Dish")))
+        ~((st.session_state.plaque_log["image_title"] == selected_name) &
+          (st.session_state.plaque_log["dish_id"].fillna("").str.startswith("Dish")))
     ]
     st.session_state.plaque_log = pd.concat([
         st.session_state.plaque_log,
