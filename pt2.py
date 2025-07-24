@@ -50,6 +50,15 @@ def detect_features(gray_img, diameter, minmass, separation, confidence):
         features = pd.DataFrame()
     return features
 
+def resize_with_scale(image, max_width=1000):
+    h, w = image.shape[:2]
+    if w > max_width:
+        scale = max_width / w
+        new_w, new_h = int(w * scale), int(h * scale)
+        resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        return resized, scale
+    return image, 1.0
+
 def resize_for_display(image, max_width=1000):
     h, w = image.shape[:2]
     if w > max_width:
@@ -71,7 +80,9 @@ if uploaded_files:
     proc = preprocess_image(gray, invert, contrast)
     image_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-    # Draw
+    # Resize for canvas preview
+    canvas_bg_resized, canvas_scale = resize_with_scale(image_rgb)
+
     draw_mode = st.selectbox("Drawing mode", ["transform", "circle"])
     st.subheader(selected_name)
 
@@ -79,15 +90,15 @@ if uploaded_files:
         fill_color="rgba(0, 255, 0, 0.3)",
         stroke_width=2,
         stroke_color="green",
-        background_image=Image.fromarray(image_rgb),
+        background_image=Image.fromarray(canvas_bg_resized),
         update_streamlit=True,
-        height=image_rgb.shape[0],
-        width=image_rgb.shape[1],
+        height=canvas_bg_resized.shape[0],
+        width=canvas_bg_resized.shape[1],
         drawing_mode=draw_mode,
         key=f"canvas_{selected_name}"
     )
 
-    # --- Transform circle coords to image space ---
+    # --- Transform circle coords to original image space ---
     roi_img = proc
     region_defined = False
     crop_bounds = None
@@ -96,9 +107,9 @@ if uploaded_files:
     if canvas_result.json_data and canvas_result.json_data["objects"]:
         circle = canvas_result.json_data["objects"][0]
         if circle["type"] == "circle":
-            left = circle["left"]
-            top = circle["top"]
-            r = circle["radius"]
+            left = circle["left"] / canvas_scale
+            top = circle["top"] / canvas_scale
+            r = circle["radius"] / canvas_scale
 
             cx = int(round(left + r))
             cy = int(round(top + r))
@@ -110,7 +121,6 @@ if uploaded_files:
             crop_bounds = (x1, y1)
             region_defined = True
 
-            # Draw the ROI circle on the image for display
             cv2.circle(display_overlay, (cx, cy), r, (0, 255, 0), 2)
         else:
             st.warning("Please draw a circle to define ROI.")
@@ -131,11 +141,9 @@ if uploaded_files:
         cv2.circle(det_img, (x, y), diameter // 2, (0, 255, 0), 1)
         cv2.circle(det_img, (x, y), 2, (255, 0, 0), -1)
 
-    # Resize for display
     display_overlay_resized = resize_for_display(display_overlay)
     det_img_resized = resize_for_display(det_img)
 
-    # Show images
     st.image(display_overlay_resized, caption="Original + ROI Overlay")
     st.image(det_img_resized, caption=f"Detected plaques: {len(features)}")
 
