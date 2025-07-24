@@ -26,6 +26,7 @@ with st.sidebar:
     st.markdown("### 🖼️ Output Options")
     overlay_on_original = st.checkbox("Overlay Circles on Original", value=True)
     downscale_factor = st.slider("Downscale Factor", 0.1, 1.0, 0.25, step=0.05)
+    show_rejected = st.checkbox("Show Rejected Detections", value=True)
 
 # Upload
 uploaded_file = st.file_uploader("📷 Upload an image", type=["jpg", "jpeg", "png", "tif"])
@@ -49,7 +50,7 @@ if uploaded_file:
     else:
         circles = np.uint16(np.around(circles[0]))[:num_plates]
         circles = sorted(circles, key=lambda c: (c[1], c[0]))
-        
+
         # Overlay image: either original or grayscale copy
         overlay_base = cv2.cvtColor(orig_array, cv2.COLOR_GRAY2BGR) if overlay_on_original else cv2.cvtColor(img_array, cv2.COLOR_GRAY2BGR)
 
@@ -87,22 +88,31 @@ if uploaded_file:
 
             # Detect features
             try:
-                spots = tp.locate(norm, diameter=diameter, minmass=minmass, invert=False)
+                all_spots = tp.locate(norm, diameter=diameter, minmass=minmass, invert=False)
             except Exception:
                 continue
 
-            if not spots.empty:
-                # Filter by brightness (mass)
-                spots = spots[spots["mass"] >= brightness_filter]
+            kept_spots = pd.DataFrame()
+            rejected_spots = pd.DataFrame()
 
-                spots["x"] += x1
-                spots["y"] += y1
+            if not all_spots.empty:
+                all_spots["x"] += x1
+                all_spots["y"] += y1
 
-                for _, s in spots.iterrows():
+                kept_spots = all_spots[all_spots["mass"] >= brightness_filter]
+                rejected_spots = all_spots[all_spots["mass"] < brightness_filter]
+
+                # Draw detections
+                for _, s in kept_spots.iterrows():
                     cx, cy = int(s["x"]), int(s["y"])
                     cv2.circle(overlay_base, (cx, cy), 2, (0, 255, 0), 1)
 
-            count = len(spots)
+                if show_rejected:
+                    for _, s in rejected_spots.iterrows():
+                        cx, cy = int(s["x"]), int(s["y"])
+                        cv2.circle(overlay_base, (cx, cy), 2, (0, 0, 255), 1)
+
+            count = len(kept_spots)
             results.append({"Plate": f"Plate {i+1}", "Count": count})
 
             # Draw plate ring and label
