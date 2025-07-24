@@ -75,7 +75,7 @@ if uploaded_files:
     # Resize for canvas preview
     canvas_bg_resized, canvas_scale = resize_with_scale(image_rgb)
 
-    draw_mode = st.selectbox("Drawing mode", ["transform", "circle"])
+    draw_mode = st.selectbox("Drawing mode", ["transform", "rect"])
     st.subheader(selected_name)
 
     canvas_result = st_canvas(
@@ -90,28 +90,29 @@ if uploaded_files:
         key=f"canvas_{selected_name}"
     )
 
-    # --- Transform circle coords to original image space ---
+    # --- Transform rectangle coords to original image space ---
     roi_img = proc
-    region_defined = False
     crop_bounds = None
     display_overlay = image_rgb.copy()
 
     if canvas_result.json_data and canvas_result.json_data["objects"]:
-        circle = canvas_result.json_data["objects"][0]
-        if circle["type"] == "circle":
-            left = circle["left"] / canvas_scale
-            top = circle["top"] / canvas_scale
-            r = circle["radius"] / canvas_scale
+        rect = canvas_result.json_data["objects"][0]
+        if rect["type"] == "rect":
+            left = rect["left"] / canvas_scale
+            top = rect["top"] / canvas_scale
+            width = rect["width"] / canvas_scale
+            height = rect["height"] / canvas_scale
 
-            cx = int(round(left + r))
-            cy = int(round(top + r))
-            r = int(round(r))
+            x1 = int(round(left))
+            y1 = int(round(top))
+            x2 = int(round(left + width))
+            y2 = int(round(top + height))
 
-            y1, y2 = max(0, cy - r), min(proc.shape[0], cy + r)
-            x1, x2 = max(0, cx - r), min(proc.shape[1], cx + r)
+            x1, y1 = max(0, x1), max(0, y1)
+            x2, y2 = min(proc.shape[1], x2), min(proc.shape[0], y2)
+
             roi_img = proc[y1:y2, x1:x2].copy()
             crop_bounds = (x1, y1)
-            region_defined = True
 
             # Detect
             features = detect_features(roi_img, diameter, minmass, separation, confidence)
@@ -126,6 +127,9 @@ if uploaded_files:
                 cv2.circle(display_overlay, (x, y), diameter // 2, (0, 255, 0), 1)
                 cv2.circle(display_overlay, (x, y), 2, (255, 0, 0), -1)
 
+            # Draw crop rectangle
+            cv2.rectangle(display_overlay, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
             # Resize for display
             display_overlay_resized, _ = resize_with_scale(display_overlay)
             st.image(display_overlay_resized, caption=f"Detected plaques: {len(features)}")
@@ -137,6 +141,6 @@ if uploaded_files:
             csv = st.session_state.plaque_log.to_csv(index=False).encode("utf-8")
             st.download_button("Download CSV", data=csv, file_name="plaque_counts.csv", mime="text/csv")
         else:
-            st.warning("Please draw a circle to define ROI.")
+            st.warning("Please draw a rectangle to define ROI.")
     else:
-        st.warning("Draw a circle to define the region of interest.")
+        st.warning("Draw a rectangle to define the region of interest.")
