@@ -112,6 +112,7 @@ if uploaded_files:
         features = pd.DataFrame(columns=["x", "y"])
 
     dish_circles = detect_multiple_dishes(gray, num_dishes)
+    new_rows = []
     for i, (cx, cy, cr) in enumerate(dish_circles):
         rx, ry = int(cr * 0.95), int(cr * 0.95)
         cv2.ellipse(display_overlay, (cx, cy), (rx, ry), 0, 0, 360, (255, 0, 0), 2)
@@ -126,14 +127,19 @@ if uploaded_files:
         cv2.putText(display_overlay, f"Dish {i+1}: {plaque_count}", (cx - 40, cy),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
-        st.session_state.plaque_log = st.session_state.plaque_log[
-            st.session_state.plaque_log.image_title != selected_name or
-            st.session_state.plaque_log.dish_id != f"Dish {i+1}"
-        ]
-        st.session_state.plaque_log.loc[len(st.session_state.plaque_log)] = [selected_name, f"Dish {i+1}", plaque_count]
+        new_rows.append({"image_title": selected_name, "dish_id": f"Dish {i+1}", "num_plaques": plaque_count})
 
     display_overlay_resized, _ = resize_with_scale(display_overlay)
     st.image(display_overlay_resized, caption="Detected plaques per dish")
+
+    st.session_state.plaque_log = st.session_state.plaque_log[
+        ~((st.session_state.plaque_log.image_title == selected_name) &
+          (st.session_state.plaque_log.dish_id.str.startswith("Dish")))
+    ]
+    st.session_state.plaque_log = pd.concat([
+        st.session_state.plaque_log,
+        pd.DataFrame(new_rows)
+    ], ignore_index=True)
 
     csv = st.session_state.plaque_log.to_csv(index=False).encode("utf-8")
     st.download_button("Download CSV", data=csv, file_name="plaque_counts.csv", mime="text/csv")
