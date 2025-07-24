@@ -60,15 +60,13 @@ def resize_with_scale(image, max_width=1000):
     return image, 1.0
 
 def find_plate_regions(gray_img):
-    blurred = cv2.medianBlur(gray_img, 5)
+    blurred = cv2.GaussianBlur(gray_img, (9, 9), 2)
     circles = cv2.HoughCircles(
-        blurred, cv2.HOUGH_GRADIENT, dp=1.2, minDist=100,
-        param1=100, param2=50, minRadius=50, maxRadius=0
+        blurred, cv2.HOUGH_GRADIENT, dp=1.2, minDist=gray_img.shape[0]//4,
+        param1=100, param2=60, minRadius=gray_img.shape[0]//10, maxRadius=0
     )
     if circles is not None:
         circles = np.uint16(np.around(circles[0]))
-        # Keep only the largest N circles (plates)
-        circles = sorted(circles, key=lambda c: c[2], reverse=True)[:5]
         return [(x, y, r) for x, y, r in circles]
     return []
 
@@ -107,14 +105,14 @@ if uploaded_files:
     total_features = 0
     regions = []
 
-    # Detect default plate regions
+    # Detect circular plate regions
     plate_circles = find_plate_regions(gray)
     for x, y, r in plate_circles:
-        pad = int(r * 0.9)
-        x1, y1 = max(0, x - pad), max(0, y - pad)
-        x2, y2 = min(proc.shape[1], x + pad), min(proc.shape[0], y + pad)
+        pad_r = int(r * 0.85)
+        x1, y1 = max(0, x - pad_r), max(0, y - pad_r)
+        x2, y2 = min(proc.shape[1], x + pad_r), min(proc.shape[0], y + pad_r)
         regions.append((x1, y1, x2, y2))
-        cv2.rectangle(display_overlay, (x1, y1), (x2, y2), (255, 0, 0), 2)
+        cv2.circle(display_overlay, (x, y), pad_r, (255, 0, 0), 2)
 
     # Add user rectangles
     if canvas_result.json_data and canvas_result.json_data["objects"]:
