@@ -15,7 +15,7 @@ invert = st.checkbox("Invert image", value=True)
 contrast = st.checkbox("Apply contrast stretch", value=True)
 
 # Detection parameters
-diameter = st.slider("Feature Diameter", 5, 51, 15, 2)
+diameter = st.slider("Feature Diameter", 5, 50, 15, 1)
 minmass = st.slider("Minimum Mass", 1, 100, 10, 1)
 separation = st.slider("Minimum Separation", 1, 30, 5, 1)
 confidence = st.slider("Percentile Confidence to Keep", 0, 100, 90, 1)
@@ -90,57 +90,49 @@ if uploaded_files:
         key=f"canvas_{selected_name}"
     )
 
-    # --- Transform rectangle coords to original image space ---
-    roi_img = proc
-    crop_bounds = None
     display_overlay = image_rgb.copy()
+    total_features = 0
 
     if canvas_result.json_data and canvas_result.json_data["objects"]:
-        rect = canvas_result.json_data["objects"][0]
-        if rect["type"] == "rect":
-            left = rect["left"] / canvas_scale
-            top = rect["top"] / canvas_scale
-            width = rect["width"] / canvas_scale
-            height = rect["height"] / canvas_scale
+        for rect in canvas_result.json_data["objects"]:
+            if rect["type"] == "rect":
+                left = rect["left"] / canvas_scale
+                top = rect["top"] / canvas_scale
+                width = rect["width"] / canvas_scale
+                height = rect["height"] / canvas_scale
 
-            x1 = int(round(left))
-            y1 = int(round(top))
-            x2 = int(round(left + width))
-            y2 = int(round(top + height))
+                x1 = int(round(left))
+                y1 = int(round(top))
+                x2 = int(round(left + width))
+                y2 = int(round(top + height))
 
-            x1, y1 = max(0, x1), max(0, y1)
-            x2, y2 = min(proc.shape[1], x2), min(proc.shape[0], y2)
+                x1, y1 = max(0, x1), max(0, y1)
+                x2, y2 = min(proc.shape[1], x2), min(proc.shape[0], y2)
 
-            roi_img = proc[y1:y2, x1:x2].copy()
-            crop_bounds = (x1, y1)
+                roi_img = proc[y1:y2, x1:x2].copy()
+                crop_bounds = (x1, y1)
 
-            # Detect
-            features = detect_features(roi_img, diameter, minmass, separation, confidence)
+                features = detect_features(roi_img, diameter, minmass, separation, confidence)
 
-            if features is None or features.empty:
-                st.info("No features found.")
-                features = pd.DataFrame(columns=["x", "y"])
+                if features is None or features.empty:
+                    features = pd.DataFrame(columns=["x", "y"])
 
-            # Draw detection results on the original image overlay
-            for _, row in features.iterrows():
-                x, y = int(round(row["x"] + crop_bounds[0])), int(round(row["y"] + crop_bounds[1]))
-                cv2.circle(display_overlay, (x, y), diameter // 2, (0, 255, 0), 1)
-                cv2.circle(display_overlay, (x, y), 2, (255, 0, 0), -1)
+                total_features += len(features)
 
-            # Draw crop rectangle
-            cv2.rectangle(display_overlay, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                for _, row in features.iterrows():
+                    x, y = int(round(row["x"] + crop_bounds[0])), int(round(row["y"] + crop_bounds[1]))
+                    cv2.circle(display_overlay, (x, y), diameter // 2, (0, 255, 0), 1)
+                    cv2.circle(display_overlay, (x, y), 2, (255, 0, 0), -1)
 
-            # Resize for display
-            display_overlay_resized, _ = resize_with_scale(display_overlay)
-            st.image(display_overlay_resized, caption=f"Detected plaques: {len(features)}")
+                cv2.rectangle(display_overlay, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
-            # Log + Export
-            st.session_state.plaque_log = st.session_state.plaque_log[st.session_state.plaque_log.image_title != selected_name]
-            st.session_state.plaque_log.loc[len(st.session_state.plaque_log)] = [selected_name, len(features)]
+        display_overlay_resized, _ = resize_with_scale(display_overlay)
+        st.image(display_overlay_resized, caption=f"Detected plaques: {total_features}")
 
-            csv = st.session_state.plaque_log.to_csv(index=False).encode("utf-8")
-            st.download_button("Download CSV", data=csv, file_name="plaque_counts.csv", mime="text/csv")
-        else:
-            st.warning("Please draw a rectangle to define ROI.")
+        st.session_state.plaque_log = st.session_state.plaque_log[st.session_state.plaque_log.image_title != selected_name]
+        st.session_state.plaque_log.loc[len(st.session_state.plaque_log)] = [selected_name, total_features]
+
+        csv = st.session_state.plaque_log.to_csv(index=False).encode("utf-8")
+        st.download_button("Download CSV", data=csv, file_name="plaque_counts.csv", mime="text/csv")
     else:
-        st.warning("Draw a rectangle to define the region of interest.")
+        st.warning("Draw one or more rectangles to define regions of interest.")
