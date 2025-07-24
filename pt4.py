@@ -60,16 +60,30 @@ def resize_with_scale(image, max_width=1000):
         return resized, scale
     return image, 1.0
 
-def detect_multiple_dishes(gray):
+def detect_multiple_dishes(gray, min_dist_factor=1.1):
     circles = cv2.HoughCircles(
-        gray, cv2.HOUGH_GRADIENT, dp=1.2, minDist=100,
+        gray, cv2.HOUGH_GRADIENT, dp=1.2, minDist=20,
         param1=50, param2=30,
         minRadius=int(min(gray.shape[:2]) * 0.15),
         maxRadius=int(min(gray.shape[:2]) * 0.6)
     )
-    if circles is not None:
-        return np.round(circles[0]).astype(int)
-    return []
+    if circles is None:
+        return []
+
+    circles = np.round(circles[0]).astype(int)
+    filtered = []
+    for c in sorted(circles, key=lambda x: -x[2]):
+        cx, cy, cr = c
+        keep = True
+        for fx, fy, fr in filtered:
+            dist = np.hypot(cx - fx, cy - fy)
+            if dist < min(cr, fr) * min_dist_factor:
+                keep = False
+                break
+        if keep:
+            filtered.append((cx, cy, cr))
+
+    return filtered
 
 def ellipse_mask_filter(features, cx, cy, rx, ry, angle_deg):
     angle_rad = np.deg2rad(angle_deg)
@@ -88,12 +102,10 @@ if uploaded_files:
     selected_name = st.selectbox("Select image", file_names)
     selected_file = next(file for file in uploaded_files if file.name == selected_name)
 
-    # Load and optionally compress the image
     file_bytes = bytearray(selected_file.read())
     img_np = np.frombuffer(file_bytes, np.uint8)
     img = cv2.imdecode(img_np, cv2.IMREAD_COLOR)
 
-    # Resize down if the image exceeds 1MB in raw pixels (approx)
     while img.nbytes > 1_000_000:
         h, w = img.shape[:2]
         img = cv2.resize(img, (int(w * 0.8), int(h * 0.8)), interpolation=cv2.INTER_AREA)
@@ -102,7 +114,6 @@ if uploaded_files:
     proc = preprocess_image(gray, invert, contrast)
     image_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-    # Resize for canvas preview
     canvas_bg_resized, canvas_scale = resize_with_scale(image_rgb)
 
     st.subheader(selected_name)
@@ -135,7 +146,6 @@ if uploaded_files:
     display_overlay_resized, _ = resize_with_scale(display_overlay)
     st.image(display_overlay_resized, caption=f"Detected plaques: {total_features}")
 
-    # Update log
     st.session_state.plaque_log = st.session_state.plaque_log[st.session_state.plaque_log.image_title != selected_name]
     for dish_index, count in dish_counts:
         st.session_state.plaque_log.loc[len(st.session_state.plaque_log)] = [selected_name, dish_index, count]
