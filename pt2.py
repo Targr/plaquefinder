@@ -123,7 +123,7 @@ if uploaded_files:
         cv2.circle(det_img, (x, y), diameter // 2, (0, 255, 0), 1)
         cv2.circle(det_img, (x, y), 2, (255, 0, 0), -1)
 
-    def resize_for_display(image, max_width=1000):
+        def resize_for_display(image, max_width=1000):
     h, w = image.shape[:2]
     if w > max_width:
         scale = max_width / w
