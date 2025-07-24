@@ -4,93 +4,94 @@ import pandas as pd
 import cv2
 import trackpy as tp
 from PIL import Image
-from io import BytesIO
+import datetime
 
-st.set_page_config(layout="wide")
-st.title("Trackpy-Based Plaque Counter")
+st.set_page_config(page_title="Plaque Counter", layout="wide")
+st.title("🧫 Plaque Counter")
+st.caption("Upload an image of petri dishes and count plaques using Trackpy.")
 
-# === Sidebar parameters ===
-st.sidebar.header("Detection Parameters")
-num_plates = st.sidebar.number_input("Number of Plates", 1, 10, value=5)
-diameter = st.sidebar.slider("Blob Diameter (px)", 3, 15, value=7)
-minmass = st.sidebar.slider("Minimum Mass", 10, 200, value=30)
-invert = st.sidebar.checkbox("Invert Contrast (for light plaques)", value=False)
+# Sidebar: parameters
+with st.sidebar:
+    st.header("🔧 Detection Settings")
+    num_plates = st.number_input("Estimated # of Plates", 1, 12, 4, help="Adjust if detection seems off")
+    diameter = st.slider("Blob Diameter (px)", 3, 15, 7, help="Estimated size of a plaque in pixels")
+    minmass = st.slider("Minimum Brightness (mass)", 10, 300, 40, help="Lower = more sensitivity")
+    invert = st.checkbox("Invert Contrast", value=True, help="Enable if plaques are brighter than background")
 
-# === Upload image ===
-uploaded_file = st.file_uploader("Upload image of plates", type=["jpg", "jpeg", "png", "tif"])
+    st.markdown("---")
+    st.caption("Tip: default settings usually work well.")
+
+# Upload image
+uploaded_file = st.file_uploader("📷 Upload Image", type=["jpg", "jpeg", "png", "tif"])
 
 if uploaded_file:
     image = Image.open(uploaded_file).convert("L")
     img_array = np.array(image)
+
     st.image(image, caption="Uploaded Image", use_column_width=True)
 
-    # Convert to blur for circle detection
+    # Detect plates with HoughCircles
     img_blur = cv2.medianBlur(img_array, 5)
     circles = cv2.HoughCircles(img_blur, cv2.HOUGH_GRADIENT, dp=1.2, minDist=150,
                                param1=50, param2=30, minRadius=100, maxRadius=300)
 
     if circles is None or len(circles[0]) < num_plates:
-        st.warning("Detected fewer plates than expected.")
+        st.error("⚠️ Fewer plates detected than expected. Try adjusting blur, lighting, or plate count.")
     else:
         circles = np.uint16(np.around(circles[0]))
         circles = sorted(circles, key=lambda c: (c[1], c[0]))[:num_plates]
-
-        output_img = cv2.cvtColor(img_array, cv2.COLOR_GRAY2BGR)
-        results = []
+        annotated = cv2.cvtColor(img_array, cv2.COLOR_GRAY2BGR)
+        plate_data = []
 
         for i, (x, y, r) in enumerate(circles):
-            # Define safe ROI bounds
+            # Bound crop region safely
             x1, x2 = max(0, x - r), min(img_array.shape[1], x + r)
             y1, y2 = max(0, y - r), min(img_array.shape[0], y + r)
-            if x2 <= x1 or y2 <= y1:
+            roi = img_array[y1:y2, x1:x2]
+
+            if roi.size == 0 or roi.max() == roi.min():
                 continue
 
-            roi_crop = img_array[y1:y2, x1:x2]
-            if roi_crop.size == 0 or np.max(roi_crop) == np.min(roi_crop):
-                continue
-
-            # Mask outside of circle in cropped ROI
-            mask = np.zeros_like(roi_crop)
+            # Mask out circular region
+            mask = np.zeros_like(roi)
             cv2.circle(mask, (r, r), r, 255, -1)
-            roi_crop = cv2.bitwise_and(roi_crop, roi_crop, mask=mask)
+            roi = cv2.bitwise_and(roi, roi, mask=mask)
 
             # Normalize
-            norm = (roi_crop - roi_crop.min()) / (roi_crop.max() - roi_crop.min() + 1e-8)
+            norm = roi.astype(np.float32)
+            norm = (norm - norm.min()) / (norm.max() - norm.min() + 1e-8)
             norm = (norm * 255).astype(np.uint8)
 
             if invert:
                 norm = 255 - norm
 
-            # Use Trackpy to detect plaques
             try:
-                features = tp.locate(norm, diameter=diameter, minmass=minmass, invert=False)
+                spots = tp.locate(norm, diameter=diameter, minmass=minmass, invert=False)
             except Exception:
                 continue
 
-            if features.empty:
-                count = 0
-            else:
-                # Shift local coords to global image
-                features['x'] += x1
-                features['y'] += y1
+            if not spots.empty:
+                spots["x"] += x1
+                spots["y"] += y1
+                for _, s in spots.iterrows():
+                    cx, cy = int(s["x"]), int(s["y"])
+                    cv2.circle(annotated, (cx, cy), 4, (0, 255, 0), 1)
 
-                for _, row in features.iterrows():
-                    cx, cy = int(row['x']), int(row['y'])
-                    cv2.circle(output_img, (cx, cy), 4, (0, 255, 0), 1)
-
-                count = len(features)
-
-            # Label plate
-            cv2.putText(output_img, f"P{i+1}: {count}", (x - 50, y),
+            count = len(spots)
+            cv2.putText(annotated, f"P{i+1}: {count}", (x - 50, y),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
 
-            results.append({"Plate": f"Plate {i+1}", "Count": count})
+            plate_data.append({"Plate": f"Plate {i+1}", "Count": count})
 
-        st.image(output_img, caption="Detected Plaques per Plate", use_column_width=True)
+        # Display annotated image
+        st.image(annotated, caption="Detected Plaques", use_column_width=True)
 
-        df = pd.DataFrame(results)
-        st.subheader("Plaque Counts")
-        st.dataframe(df)
+        # Results table
+        df = pd.DataFrame(plate_data)
+        st.subheader("📊 Plaque Counts per Plate")
+        st.dataframe(df.style.highlight_max(axis=0, color="lightgreen"), use_container_width=True)
 
-        csv = df.to_csv(index=False).encode("utf-8")
-        st.download_button("Download as CSV", csv, "plaque_counts.csv", "text/csv")
+        # Export CSV
+        filename = f"plaque_counts_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        st.download_button("⬇️ Download CSV", data=df.to_csv(index=False).encode("utf-8"),
+                           file_name=filename, mime="text/csv")
