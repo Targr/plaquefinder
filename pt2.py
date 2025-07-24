@@ -59,14 +59,6 @@ def resize_with_scale(image, max_width=1000):
         return resized, scale
     return image, 1.0
 
-def resize_for_display(image, max_width=1000):
-    h, w = image.shape[:2]
-    if w > max_width:
-        scale = max_width / w
-        new_w, new_h = int(w * scale), int(h * scale)
-        return cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
-    return image
-
 # === Main App ===
 if uploaded_files:
     file_names = [file.name for file in uploaded_files]
@@ -121,35 +113,30 @@ if uploaded_files:
             crop_bounds = (x1, y1)
             region_defined = True
 
-            cv2.circle(display_overlay, (cx, cy), r, (0, 255, 0), 2)
+            # Detect
+            features = detect_features(roi_img, diameter, minmass, separation, confidence)
+
+            if features is None or features.empty:
+                st.info("No features found.")
+                features = pd.DataFrame(columns=["x", "y"])
+
+            # Draw detection results on the original image overlay
+            for _, row in features.iterrows():
+                x, y = int(round(row["x"] + crop_bounds[0])), int(round(row["y"] + crop_bounds[1]))
+                cv2.circle(display_overlay, (x, y), diameter // 2, (0, 255, 0), 1)
+                cv2.circle(display_overlay, (x, y), 2, (255, 0, 0), -1)
+
+            # Resize for display
+            display_overlay_resized, _ = resize_with_scale(display_overlay)
+            st.image(display_overlay_resized, caption=f"Detected plaques: {len(features)}")
+
+            # Log + Export
+            st.session_state.plaque_log = st.session_state.plaque_log[st.session_state.plaque_log.image_title != selected_name]
+            st.session_state.plaque_log.loc[len(st.session_state.plaque_log)] = [selected_name, len(features)]
+
+            csv = st.session_state.plaque_log.to_csv(index=False).encode("utf-8")
+            st.download_button("Download CSV", data=csv, file_name="plaque_counts.csv", mime="text/csv")
         else:
             st.warning("Please draw a circle to define ROI.")
     else:
         st.warning("Draw a circle to define the region of interest.")
-
-    # Detect
-    features = detect_features(roi_img, diameter, minmass, separation, confidence)
-
-    if features is None or features.empty:
-        st.info("No features found.")
-        features = pd.DataFrame(columns=["x", "y"])
-
-    # Draw detection results
-    det_img = cv2.cvtColor(roi_img.copy(), cv2.COLOR_GRAY2RGB)
-    for _, row in features.iterrows():
-        x, y = int(round(row["x"])), int(round(row["y"]))
-        cv2.circle(det_img, (x, y), diameter // 2, (0, 255, 0), 1)
-        cv2.circle(det_img, (x, y), 2, (255, 0, 0), -1)
-
-    display_overlay_resized = resize_for_display(display_overlay)
-    det_img_resized = resize_for_display(det_img)
-
-    st.image(display_overlay_resized, caption="Original + ROI Overlay")
-    st.image(det_img_resized, caption=f"Detected plaques: {len(features)}")
-
-    # Log + Export
-    st.session_state.plaque_log = st.session_state.plaque_log[st.session_state.plaque_log.image_title != selected_name]
-    st.session_state.plaque_log.loc[len(st.session_state.plaque_log)] = [selected_name, len(features)]
-
-    csv = st.session_state.plaque_log.to_csv(index=False).encode("utf-8")
-    st.download_button("Download CSV", data=csv, file_name="plaque_counts.csv", mime="text/csv")
