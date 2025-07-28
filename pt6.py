@@ -8,7 +8,7 @@ import trackpy as tp
 import io
 
 st.set_page_config(layout="wide")
-st.title("Interactive Plaque Counter (Canvas-Aligned & Cropped)")
+st.title("Interactive Plaque Counter (Dish-Cropped with Ellipse Masking)")
 
 # === Image Upload ===
 uploaded_files = st.file_uploader("Upload plaque images", type=["png", "jpg", "jpeg", "tif"], accept_multiple_files=True)
@@ -21,21 +21,6 @@ minmass = st.slider("Minimum Mass", 1, 100, 10, 1)
 separation = st.slider("Minimum Separation", 1, 30, 5, 1)
 confidence = st.slider("Percentile Confidence to Keep", 0, 100, 90, 1)
 num_dishes = st.slider("Number of dishes to detect", 1, 10, 1, 1)
-
-st.markdown("### Advanced (TrackPy-specific only when invert OFF)")
-
-invert_behavior = not invert
-
-if invert_behavior:
-    tp_diameter = st.slider("TrackPy: Diameter", 3, 51, diameter, 2)
-    tp_minmass = st.slider("TrackPy: Minmass", 1, 1000, minmass, 10)
-    tp_separation = st.slider("TrackPy: Separation", 1, 50, separation, 2)
-    tp_percentile = st.slider("TrackPy: Percentile", 0, 100, confidence, 5)
-else:
-    tp_diameter = diameter
-    tp_minmass = minmass
-    tp_separation = separation
-    tp_percentile = confidence
 
 # Global log
 def reset_log():
@@ -52,48 +37,20 @@ def preprocess_image(img, invert=False, contrast=False):
         img = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX)
     return img
 
-def detect_features(gray_img, diameter, minmass, separation, confidence, use_tp=True):
-    if use_tp:
-        norm_img = (gray_img / 255.0).astype(np.float32)
-        try:
-            features = tp.locate(
-                norm_img,
-                diameter=diameter,
-                minmass=minmass,
-                separation=separation,
-                percentile=confidence,
-                invert=False
-            )
-        except Exception:
-            features = pd.DataFrame()
-        return features
-    else:
-        blur = cv2.GaussianBlur(gray_img, (5, 5), 0)
-        thresh = cv2.adaptiveThreshold(
-            blur, 255,
-            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY_INV,
-            11, 2
+def detect_features(gray_img, diameter, minmass, separation, confidence):
+    norm_img = (gray_img / 255.0).astype(np.float32)
+    try:
+        features = tp.locate(
+            norm_img,
+            diameter=diameter,
+            minmass=minmass,
+            separation=separation,
+            percentile=confidence,
+            invert=False
         )
-        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        centroids = []
-        for cnt in contours:
-            M = cv2.moments(cnt)
-            if M["m00"] != 0:
-                cx = M["m10"] / M["m00"]
-                cy = M["m01"] / M["m00"]
-                centroids.append((cx, cy))
-        return pd.DataFrame(centroids, columns=["x", "y"])
-
-def resize_with_scale(image, max_width=1000):
-    h, w = image.shape[:2]
-    if w > max_width:
-        scale = max_width / w
-        new_w, new_h = int(w * scale), int(h * scale)
-        resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
-        return resized, scale
-    return image, 1.0
+    except Exception:
+        features = pd.DataFrame()
+    return features
 
 def detect_multiple_dishes(gray, max_dishes):
     circles = cv2.HoughCircles(
@@ -123,6 +80,7 @@ if uploaded_files:
     selected_name = st.selectbox("Select image", file_names)
     selected_file = next(file for file in uploaded_files if file.name == selected_name)
 
+    # Load and optionally compress the image
     file_bytes = bytearray(selected_file.read())
     img_np = np.frombuffer(file_bytes, np.uint8)
     img = cv2.imdecode(img_np, cv2.IMREAD_COLOR)
@@ -135,57 +93,91 @@ if uploaded_files:
     proc = preprocess_image(gray, invert, contrast)
     image_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-    scale_factor = 1.0 / num_dishes
-    auto_diameter = max(5, int(tp_diameter * scale_factor))
-    auto_separation = max(1, int(tp_separation * scale_factor))
-    auto_minmass = max(1, int(tp_minmass * scale_factor))
-
     st.subheader(selected_name)
-    display_overlay = image_rgb.copy()
 
     dish_circles = detect_multiple_dishes(gray, num_dishes)
     new_rows = []
 
-    for i, (cx, cy, cr) in enumerate(dish_circles):
-        rx, ry = int(cr * 0.95), int(cr * 0.95)
-        cv2.ellipse(display_overlay, (cx, cy), (rx, ry), 0, 0, 360, (255, 0, 0), 2)
+    if len(dish_circles) > 0:
+        st.subheader(f"Detected {len(dish_circles)} dish(es)")
 
-        # Crop region of interest (dish)
-        x1, y1 = max(cx - rx, 0), max(cy - ry, 0)
-        x2, y2 = min(cx + rx, img.shape[1]), min(cy + ry, img.shape[0])
-        dish_crop = gray[y1:y2, x1:x2]
-        dish_proc = preprocess_image(dish_crop.copy(), invert, contrast)
+        for i, (cx, cy, cr) in enumerate(dish_circles):
+            # Crop a square region around the dish
+            margin = int(cr * 1.1)
+            x1 = max(0, cx - margin)
+            x2 = min(img.shape[1], cx + margin)
+            y1 = max(0, cy - margin)
+            y2 = min(img.shape[0], cy + margin)
+            dish_crop = img[y1:y2, x1:x2]
+            dish_gray = cv2.cvtColor(dish_crop, cv2.COLOR_BGR2GRAY)
+            dish_proc = preprocess_image(dish_gray, invert, contrast)
+            dish_overlay = cv2.cvtColor(dish_crop, cv2.COLOR_BGR2RGB)
 
-        # Detect plaques in cropped dish
-        dish_features = detect_features(
-            dish_proc, auto_diameter, auto_minmass, auto_separation, tp_percentile, use_tp=not invert
-        )
-        plaque_count = len(dish_features)
+            # Adjust ellipse center for the cropped image
+            cx_adj = cx - x1
+            cy_adj = cy - y1
+            rx = ry = int(cr * 0.95)
+            angle_deg = 0
 
-        # Re-project local dish coordinates back to global
-        for _, row in dish_features.iterrows():
-            x_global = int(round(row["x"] + x1))
-            y_global = int(round(row["y"] + y1))
-            cv2.circle(display_overlay, (x_global, y_global), auto_diameter // 2, (0, 255, 0), 1)
-            cv2.circle(display_overlay, (x_global, y_global), 2, (255, 0, 0), -1)
+            # Detect all features in crop
+            dish_features = detect_features(dish_proc, diameter, minmass, separation, confidence)
+            if dish_features is None or dish_features.empty:
+                dish_features = pd.DataFrame(columns=["x", "y"])
 
-        cv2.putText(display_overlay, f"Dish {i+1}: {plaque_count}", (cx - 40, cy),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            # Ellipse mask
+            masked_feats = ellipse_mask_filter(dish_features, cx_adj, cy_adj, rx, ry, angle_deg)
 
-        new_rows.append({"image_title": selected_name, "dish_id": f"Dish {i+1}", "num_plaques": plaque_count})
+            # Draw ellipse and features
+            cv2.ellipse(dish_overlay, (cx_adj, cy_adj), (rx, ry), angle_deg, 0, 360, (255, 0, 0), 2)
+            for _, row in masked_feats.iterrows():
+                x, y = int(round(row["x"])), int(round(row["y"]))
+                cv2.circle(dish_overlay, (x, y), diameter // 2, (0, 255, 0), 1)
+                cv2.circle(dish_overlay, (x, y), 2, (255, 0, 0), -1)
 
-    display_overlay_resized, _ = resize_with_scale(display_overlay)
-    st.image(display_overlay_resized, caption="Detected plaques per dish")
+            count = len(masked_feats)
+            cv2.putText(dish_overlay, f"Dish {i+1}: {count}", (10, 25),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
-    # Update log
+            # Display
+            st.image(dish_overlay, caption=f"Dish {i+1}: {count} plaques", use_column_width=True)
+
+            # Log
+            new_rows.append({
+                "image_title": f"{selected_name} (Dish {i+1})",
+                "dish_id": f"Dish {i+1}",
+                "num_plaques": count
+            })
+    else:
+        # No dish detected — fallback to whole image
+        features = detect_features(proc, diameter, minmass, separation, confidence)
+        if features is None or features.empty:
+            features = pd.DataFrame(columns=["x", "y"])
+        display_overlay = image_rgb.copy()
+        for _, row in features.iterrows():
+            x, y = int(round(row["x"])), int(round(row["y"]))
+            cv2.circle(display_overlay, (x, y), diameter // 2, (0, 255, 0), 1)
+            cv2.circle(display_overlay, (x, y), 2, (255, 0, 0), -1)
+
+        count = len(features)
+        cv2.putText(display_overlay, f"Plaques: {count}", (20, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        st.image(display_overlay, caption=f"Detected plaques: {count}", use_column_width=True)
+
+        new_rows.append({
+            "image_title": selected_name,
+            "dish_id": "Whole Image",
+            "num_plaques": count
+        })
+
+    # Update session log
     st.session_state.plaque_log = st.session_state.plaque_log[
-        ~((st.session_state.plaque_log.image_title == selected_name) &
-          (st.session_state.plaque_log.dish_id.str.startswith("Dish")))
+        ~((st.session_state.plaque_log.image_title.str.startswith(selected_name)))
     ]
     st.session_state.plaque_log = pd.concat([
         st.session_state.plaque_log,
         pd.DataFrame(new_rows)
     ], ignore_index=True)
 
+    # CSV export
     csv = st.session_state.plaque_log.to_csv(index=False).encode("utf-8")
     st.download_button("Download CSV", data=csv, file_name="plaque_counts.csv", mime="text/csv")
