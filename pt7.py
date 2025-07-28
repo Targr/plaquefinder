@@ -10,12 +10,32 @@ import io
 st.set_page_config(layout="wide")
 st.title("Interactive Plaque Counter (Canvas-Aligned)")
 
-# === Image Upload ===
+# === MOBILE CAPTURE OPTION ===
+st.markdown("### 📷 Quick Mobile Capture")
+mobile_file = st.file_uploader(
+    "Take a photo of a dish",
+    type=["png", "jpg", "jpeg"],
+    accept_multiple_files=False,
+    label_visibility="collapsed"
+)
+
+# === Normal Upload Option ===
 uploaded_files = st.file_uploader("Upload plaque images", type=["png", "jpg", "jpeg", "tif"], accept_multiple_files=True)
+
+# If a mobile photo is taken, use it as the only uploaded file
+if mobile_file is not None:
+    uploaded_files = [mobile_file]
+    selected_name = mobile_file.name
+    selected_file = mobile_file
+else:
+    if uploaded_files:
+        file_names = [file.name for file in uploaded_files]
+        selected_name = st.selectbox("Select image", file_names)
+        selected_file = next(file for file in uploaded_files if file.name == selected_name)
+
+# === Detection Parameters ===
 invert = st.checkbox("Invert image", value=True)
 contrast = st.checkbox("Apply contrast stretch", value=True)
-
-# Detection parameters
 diameter = st.slider("Feature Diameter", 5, 51, 15, 2)
 minmass = st.slider("Minimum Mass", 1, 100, 10, 1)
 separation = st.slider("Minimum Separation", 1, 30, 5, 1)
@@ -85,10 +105,6 @@ def ellipse_mask_filter(features, cx, cy, rx, ry, angle_deg):
 
 # === Main App ===
 if uploaded_files:
-    file_names = [file.name for file in uploaded_files]
-    selected_name = st.selectbox("Select image", file_names)
-    selected_file = next(file for file in uploaded_files if file.name == selected_name)
-
     # Load and optionally compress the image
     file_bytes = bytearray(selected_file.read())
     img_np = np.frombuffer(file_bytes, np.uint8)
@@ -145,7 +161,6 @@ if uploaded_files:
             y1, y2 = max(cy - pad, 0), min(cy + pad, gray.shape[0])
             dish_crop = proc[y1:y2, x1:x2]
 
-            # Use full crop — no ellipse mask
             target_w, target_h = 2814, 2841
             resized_crop = cv2.resize(dish_crop, (target_w, target_h), interpolation=cv2.INTER_CUBIC)
 
