@@ -128,19 +128,18 @@ if uploaded_files:
             x, y = int(round(row["x"])), int(round(row["y"]))
             cv2.circle(display_overlay, (x, y), auto_diameter // 2, (0, 255, 0), 1)
             cv2.circle(display_overlay, (x, y), 2, (255, 0, 0), -1)
-    
-    plaque_id = f"D{i+1}_P{j+1}"
-    cv2.putText(display_overlay, plaque_id, (x + 5, y - 5),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 0), 2, cv2.LINE_AA)
-    cv2.putText(display_overlay, plaque_id, (x + 5, y - 5),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
 
+            plaque_id = f"D{i+1}_P{j+1}"
+            cv2.putText(display_overlay, plaque_id, (x + 5, y - 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 0), 2, cv2.LINE_AA)
+            cv2.putText(display_overlay, plaque_id, (x + 5, y - 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
 
-    plaque_count = len(dish_feats)
-    new_rows.append({"image_title": selected_name, "dish_id": f"Dish {i+1}", "num_plaques": plaque_count})
+        plaque_count = len(dish_feats)
+        new_rows.append({"image_title": selected_name, "dish_id": f"Dish {i+1}", "num_plaques": plaque_count})
 
-        # === AUTOMATED REFINEMENT FOR >2 DISHES ===
-    if num_dishes > 2:
+        # === REFINEMENT FOR >2 DISHES ===
+        if num_dishes > 2:
             pad = int(cr * 1.1)
             x1, x2 = max(cx - pad, 0), min(cx + pad, gray.shape[1])
             y1, y2 = max(cy - pad, 0), min(cy + pad, gray.shape[0])
@@ -166,7 +165,7 @@ if uploaded_files:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
     display_overlay_resized, _ = resize_with_scale(display_overlay)
-    st.image(display_overlay_resized, caption="Detected plaques per dish")
+    st.image(display_overlay_resized, caption="Detected plaques with IDs per dish")
 
     st.session_state.plaque_log = st.session_state.plaque_log[
         ~((st.session_state.plaque_log.image_title == selected_name) &
@@ -179,60 +178,3 @@ if uploaded_files:
 
     csv = st.session_state.plaque_log.to_csv(index=False).encode("utf-8")
     st.download_button("Download CSV", data=csv, file_name="plaque_counts.csv", mime="text/csv")
-
-# === COMPLETELY INDEPENDENT COLOR MATCH TOOL ===
-st.markdown("---")
-st.subheader("Color Finder (Independent)")
-
-enable_color_tool = st.checkbox("Enable standalone color picker", value=False)
-color_tolerance_slider = st.slider("Color distance tolerance", 0, 255, 40, 1)
-
-if enable_color_tool:
-    if uploaded_files:
-        # Resize original image for canvas
-        rgb_for_canvas, _ = resize_with_scale(image_rgb.copy())
-        h, w = rgb_for_canvas.shape[:2]
-
-        # Draw canvas for user to click a point
-        canvas_result = st_canvas(
-            fill_color="rgba(255, 255, 255, 0.3)",
-            stroke_width=5,
-            background_image=Image.fromarray(rgb_for_canvas),
-            update_streamlit=True,
-            height=h,
-            width=w,
-            drawing_mode="point",
-            key="color_picker_canvas"
-        )
-
-        # Process the click
-        if canvas_result.json_data and len(canvas_result.json_data["objects"]) > 0:
-            point = canvas_result.json_data["objects"][-1]
-            x_click = int(point["left"])
-            y_click = int(point["top"])
-
-            # Convert canvas coordinates to full-res image coordinates
-            x_orig = int(x_click * image_rgb.shape[1] / w)
-            y_orig = int(y_click * image_rgb.shape[0] / h)
-
-            if 0 <= x_orig < image_rgb.shape[1] and 0 <= y_orig < image_rgb.shape[0]:
-                selected_color = image_rgb[y_orig, x_orig].astype(np.int16)
-
-                # Show selected color
-                st.markdown(f"**Selected color:** RGB({selected_color[0]}, {selected_color[1]}, {selected_color[2]})")
-                st.color_picker("Preview", value=f"#{selected_color[0]:02x}{selected_color[1]:02x}{selected_color[2]:02x}".upper(), label_visibility="collapsed", disabled=True)
-
-                # Find all matching pixels
-                diff_img = np.linalg.norm(image_rgb.astype(np.int16) - selected_color, axis=2)
-                match_mask = diff_img <= color_tolerance_slider
-
-                # Overlay yellow on matched pixels
-                highlight_img = image_rgb.copy()
-                highlight_img[match_mask] = [255, 255, 0]  # Yellow highlight
-
-                # Show result
-                highlight_resized, _ = resize_with_scale(highlight_img)
-                st.image(highlight_resized, caption="Pixels matching selected color")
-
-    else:
-        st.info("Upload an image first to use the color picker.")
