@@ -1,41 +1,41 @@
 import streamlit as st
+import cv2
 import numpy as np
 import pandas as pd
-import cv2
-from matplotlib import pyplot as plt
 from PIL import Image
 import io
+import os
 
 st.set_page_config(layout="wide")
-st.title("Colony Detection App")
+st.title("Auto Plate Analysis: Plaques vs. Colonies")
 
-def preprocess_image(image, blur_kernel):
-    blur_kernel = blur_kernel if blur_kernel % 2 == 1 else blur_kernel + 1
+def load_image(image_file):
+    img = Image.open(image_file)
+    return np.array(img)
+
+def detect_plate_type(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (blur_kernel, blur_kernel), 0)
-    return gray, blurred
+    blur = cv2.GaussianBlur(gray, (11, 11), 0)
+    _, binary = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    white_ratio = np.sum(binary == 255) / binary.size
+    if white_ratio < 0.5:
+        return "plaque"
+    else:
+        return "colony"
 
-def detect_dish_circle(gray_img):
-    circles = cv2.HoughCircles(
-        gray_img,
-        cv2.HOUGH_GRADIENT,
-        dp=1.2,
-        minDist=gray_img.shape[0]//8,
-        param1=50,
-        param2=30,
-        minRadius=gray_img.shape[0]//4,
-        maxRadius=gray_img.shape[0]//2
-    )
-    if circles is not None:
-        circles = np.round(circles[0, :]).astype("int")
-        return circles[0]  # Use the first detected circle
-    return None
+def detect_circles(image):
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.medianBlur(gray, 5)
+    circles = cv2.HoughCircles(blurred, cv2.HOUGH_GRADIENT, dp=1.2, minDist=100,
+                               param1=50, param2=30, minRadius=100, maxRadius=0)
+    return circles
 
-def mask_outside_circle(image, circle):
-    mask = np.zeros_like(image[:, :, 0])
-    cv2.circle(mask, (circle[0], circle[1]), circle[2], (255), thickness=-1)
+def crop_plate(image, circle):
+    mask = np.zeros(image.shape[:2], dtype=np.uint8)
+    cv2.circle(mask, (circle[0], circle[1]), circle[2], 255, -1)
     masked = cv2.bitwise_and(image, image, mask=mask)
-    return masked
+    x, y, r = circle
+    return masked[y-r:y+r, x-r:x+r]
 
 def detect_colonies(gray_img, blur_kernel=7, block_size=31, C=5, min_area=5, max_area=500, enable_micro_colony_boost=True):
     blur_kernel = blur_kernel if blur_kernel % 2 == 1 else blur_kernel + 1
@@ -85,59 +85,36 @@ def detect_colonies(gray_img, blur_kernel=7, block_size=31, C=5, min_area=5, max
 
     return df
 
-def draw_colonies(image, colonies, dish_circle=None):
-    output = image.copy()
-    for _, row in colonies.iterrows():
-        cv2.circle(output, (int(row['x']), int(row['y'])), 10, (0, 255, 0), 2)
-        cv2.circle(output, (int(row['x']), int(row['y'])), 3, (0, 0, 255), -1)
-    if dish_circle is not None:
-        cv2.circle(output, (dish_circle[0], dish_circle[1]), dish_circle[2], (0, 0, 255), 4)
-    return output
+def plot_points(image, points):
+    for (x, y) in points:
+        cv2.circle(image, (x, y), 5, (0, 255, 0), 1)
+        cv2.circle(image, (x, y), 2, (0, 0, 255), -1)
+    return image
 
-uploaded_file = st.file_uploader("Upload an image", type=["png", "jpg", "jpeg"])
+uploaded_files = st.file_uploader("Upload Plate Images", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
 
-if uploaded_file is not None:
-    file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-    image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+if uploaded_files:
+    for image_file in uploaded_files:
+        image = load_image(image_file)
+        plate_type = detect_plate_type(image)
+        circles = detect_circles(image)
 
-    st.sidebar.header("Parameters")
-    colony_blur = st.sidebar.slider("Blur Kernel Size", 1, 25, 7, 2)
-    colony_thresh_block = st.sidebar.slider("Adaptive Threshold Block Size", 3, 51, 31, 2)
-    colony_thresh_C = st.sidebar.slider("Adaptive Threshold C", -10, 10, 5)
-    colony_min_area = st.sidebar.slider("Min Area (px) for Colonies", 1, 100, 5, 1)
-    colony_max_area = st.sidebar.slider("Max Area (px) for Colonies", 10, 1000, 500, 10)
-    micro_boost = st.sidebar.checkbox("Boost detection of tiny faint colonies", value=True)
+        st.subheader(f"File: {image_file.name} | Detected as: {plate_type.title()} Plate")
 
-    gray, _ = preprocess_image(image, colony_blur)
-    circle = detect_dish_circle(gray)
+        if circles is not None:
+            circles = np.uint16(np.around(circles))
+            for i, c in enumerate(circles[0, :]):
+                cropped = crop_plate(image, c)
+                gray = cv2.cvtColor(cropped, cv2.COLOR_BGR2GRAY)
+                features = detect_colonies(gray)
 
-    if circle is not None:
-        masked = mask_outside_circle(image, circle)
-        dish_gray, _ = preprocess_image(masked, colony_blur)
-        dish_features = detect_colonies(
-            dish_gray,
-            colony_blur,
-            colony_thresh_block,
-            colony_thresh_C,
-            min_area=colony_min_area,
-            max_area=colony_max_area,
-            enable_micro_colony_boost=micro_boost
-        )
-        vis_img = draw_colonies(image, dish_features, dish_circle=circle)
-        st.image(vis_img, caption=f"Detected Colonies: {len(dish_features)}", channels="BGR")
-        st.dataframe(dish_features)
-    else:
-        st.warning("No petri dish circle detected. Showing full image results.")
-        full_gray, _ = preprocess_image(image, colony_blur)
-        features = detect_colonies(
-            full_gray,
-            colony_blur,
-            colony_thresh_block,
-            colony_thresh_C,
-            min_area=colony_min_area,
-            max_area=colony_max_area,
-            enable_micro_colony_boost=micro_boost
-        )
-        vis_img = draw_colonies(image, features)
-        st.image(vis_img, caption=f"Detected Colonies (Full Image): {len(features)}", channels="BGR")
-        st.dataframe(features)
+                result = plot_points(cropped.copy(), features.to_numpy())
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.image(cropped, caption=f"Cropped Plate #{i+1}", channels="BGR")
+                with col2:
+                    st.image(result, caption=f"Detected ({len(features)} {plate_type}s)", channels="BGR")
+
+        else:
+            st.warning("No circular plates detected in image.")
