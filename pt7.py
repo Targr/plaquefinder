@@ -136,7 +136,7 @@ if uploaded_files:
                 cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
 
 
-        plaque_count = len(dish_feats)
+    plaque_count = len(dish_feats)
         new_rows.append({"image_title": selected_name, "dish_id": f"Dish {i+1}", "num_plaques": plaque_count})
 
         # === AUTOMATED REFINEMENT FOR >2 DISHES ===
