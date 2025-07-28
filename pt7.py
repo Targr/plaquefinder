@@ -151,15 +151,34 @@ if uploaded_files:
             cv2.ellipse(mask, ellipse_center, ellipse_axes, 0, 0, 360, 255, -1)
             dish_crop_masked = cv2.bitwise_and(dish_crop, dish_crop, mask=mask)
 
+            dish_h, dish_w = dish_crop_masked.shape[:2]
+            target_w = 800
+            scale_up = target_w / dish_w if dish_w > 0 else 1.0
+            resized_crop = cv2.resize(dish_crop_masked, (int(dish_w * scale_up), int(dish_h * scale_up)), interpolation=cv2.INTER_CUBIC)
+
             refined_feats = detect_features(
-                dish_crop_masked,
+                resized_crop,
                 diameter=diameter,
                 minmass=minmass,
                 separation=separation,
                 confidence=confidence
             )
-            refined_count = len(refined_feats) if refined_feats is not None else 0
-            new_rows[-1]["num_plaques"] = refined_count  # overwrite with better estimate
+
+            if refined_feats is not None and not refined_feats.empty:
+                refined_feats["x"] = refined_feats["x"] / scale_up + x1
+                refined_feats["y"] = refined_feats["y"] / scale_up + y1
+                new_rows[-1]["num_plaques"] = len(refined_feats)
+
+                for j, (_, row) in enumerate(refined_feats.iterrows()):
+                    x, y = int(round(row["x"])), int(round(row["y"]))
+                    cv2.circle(display_overlay, (x, y), diameter // 2, (0, 255, 0), 1)
+                    cv2.circle(display_overlay, (x, y), 2, (255, 0, 0), -1)
+
+                    plaque_id = f"D{i+1}_P{j+1}"
+                    cv2.putText(display_overlay, plaque_id, (x + 5, y - 5),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 0), 2, cv2.LINE_AA)
+                    cv2.putText(display_overlay, plaque_id, (x + 5, y - 5),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
 
         cv2.putText(display_overlay, f"Dish {i+1}: {new_rows[-1]['num_plaques']}", (cx - 40, cy),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
