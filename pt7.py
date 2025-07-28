@@ -140,7 +140,7 @@ if uploaded_files:
     new_rows.append({"image_title": selected_name, "dish_id": f"Dish {i+1}", "num_plaques": plaque_count})
 
         # === AUTOMATED REFINEMENT FOR >2 DISHES ===
-        if num_dishes > 2:
+    if num_dishes > 2:
             pad = int(cr * 1.1)
             x1, x2 = max(cx - pad, 0), min(cx + pad, gray.shape[1])
             y1, y2 = max(cy - pad, 0), min(cy + pad, gray.shape[0])
