@@ -172,3 +172,53 @@ if uploaded_files:
 
     csv = st.session_state.plaque_log.to_csv(index=False).encode("utf-8")
     st.download_button("Download CSV", data=csv, file_name="plaque_counts.csv", mime="text/csv")
+
+    # === NEW FEATURE: Color-Based Matching of Plaques ===
+    st.markdown("---")
+    st.subheader("Optional: Match Plaques by Color")
+
+    enable_color_match = st.checkbox("Enable color-based plaque matcher", value=False)
+    color_tolerance = st.slider("Color similarity tolerance", 0, 100, 30, 1)
+
+    if enable_color_match:
+        # Resize overlay to fit canvas
+        canvas_height, canvas_width = display_overlay_resized.shape[:2]
+        canvas_result = st_canvas(
+            fill_color="rgba(255, 255, 255, 0.3)",
+            stroke_width=3,
+            background_image=Image.fromarray(display_overlay_resized),
+            update_streamlit=True,
+            height=canvas_height,
+            width=canvas_width,
+            drawing_mode="point",
+            key="color_selector_canvas"
+        )
+
+        if canvas_result.json_data and len(canvas_result.json_data["objects"]) > 0:
+            # Get last clicked point
+            point = canvas_result.json_data["objects"][-1]
+            cx_raw = point["left"]
+            cy_raw = point["top"]
+
+            # Map to original image scale
+            cx = int(cx_raw * image_rgb.shape[1] / canvas_width)
+            cy = int(cy_raw * image_rgb.shape[0] / canvas_height)
+
+            # Get clicked color (as reference)
+            selected_rgb = image_rgb[cy, cx]
+
+            # Prepare overlay image
+            color_overlay = image_rgb.copy()
+            matched_points = []
+
+            for _, row in features.iterrows():
+                x, y = int(row["x"]), int(row["y"])
+                if 0 <= y < image_rgb.shape[0] and 0 <= x < image_rgb.shape[1]:
+                    pixel_rgb = image_rgb[y, x]
+                    diff = np.linalg.norm(pixel_rgb.astype(np.int16) - selected_rgb.astype(np.int16))
+                    if diff <= color_tolerance:
+                        matched_points.append((x, y))
+                        cv2.circle(color_overlay, (x, y), 5, (0, 255, 255), 2)  # Yellow highlight
+
+            color_overlay_resized, _ = resize_with_scale(color_overlay)
+            st.image(color_overlay_resized, caption=f"{len(matched_points)} matched plaques by color")
