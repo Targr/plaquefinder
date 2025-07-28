@@ -147,7 +147,7 @@ if uploaded_files:
 
             mask = np.zeros_like(dish_crop)
             ellipse_center = (dish_crop.shape[1] // 2, dish_crop.shape[0] // 2)
-            ellipse_axes = (int(rx * 0.9), int(ry * 0.9))
+            ellipse_axes = (int(rx * 0.75), int(ry * 0.75))  # Shrink mask to reduce edge detection
             cv2.ellipse(mask, ellipse_center, ellipse_axes, 0, 0, 360, 255, -1)
             dish_crop_masked = cv2.bitwise_and(dish_crop, dish_crop, mask=mask)
 
