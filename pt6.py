@@ -11,6 +11,8 @@ st.title("Auto Plate Analysis: Plaques vs. Colonies")
 
 def load_image(image_file):
     img = Image.open(image_file)
+    if image_file.size > 2 * 1024 * 1024:  # If file > 2MB, downscale
+        img.thumbnail((img.width // 2, img.height // 2))
     return np.array(img)
 
 def detect_plate_type(image):
@@ -35,7 +37,7 @@ def crop_plate(image, circle):
     cv2.circle(mask, (circle[0], circle[1]), circle[2], 255, -1)
     masked = cv2.bitwise_and(image, image, mask=mask)
     x, y, r = circle
-    return masked[y-r:y+r, x-r:x+r]
+    return masked[y - r:y + r, x - r:x + r]
 
 def detect_colonies(gray_img, blur_kernel=7, block_size=31, C=5, min_area=5, max_area=500, enable_micro_colony_boost=True):
     blur_kernel = blur_kernel if blur_kernel % 2 == 1 else blur_kernel + 1
@@ -91,11 +93,14 @@ def plot_points(image, points):
         cv2.circle(image, (x, y), 2, (0, 0, 255), -1)
     return image
 
-uploaded_files = st.file_uploader("Upload Plate Images", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
+uploaded_files = st.file_uploader("Upload Plate Images", type=["png", "jpg", "jpeg", "tif", "tiff"], accept_multiple_files=True)
 
 if uploaded_files:
     for image_file in uploaded_files:
         image = load_image(image_file)
+        if image.ndim == 2:
+            image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+
         plate_type = detect_plate_type(image)
         circles = detect_circles(image)
 
