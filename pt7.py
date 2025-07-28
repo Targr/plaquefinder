@@ -137,7 +137,7 @@ if uploaded_files:
 
 
     plaque_count = len(dish_feats)
-        new_rows.append({"image_title": selected_name, "dish_id": f"Dish {i+1}", "num_plaques": plaque_count})
+    new_rows.append({"image_title": selected_name, "dish_id": f"Dish {i+1}", "num_plaques": plaque_count})
 
         # === AUTOMATED REFINEMENT FOR >2 DISHES ===
         if num_dishes > 2:
