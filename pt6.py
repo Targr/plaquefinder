@@ -22,6 +22,21 @@ separation = st.slider("Minimum Separation", 1, 30, 5, 1)
 confidence = st.slider("Percentile Confidence to Keep", 0, 100, 90, 1)
 num_dishes = st.slider("Number of dishes to detect", 1, 10, 1, 1)
 
+st.markdown("### Advanced (TrackPy-specific only when invert OFF)")
+
+invert_behavior = not invert
+
+if invert_behavior:
+    tp_diameter = st.slider("TrackPy: Diameter", 3, 51, diameter, 2)
+    tp_minmass = st.slider("TrackPy: Minmass", 1, 1000, minmass, 10)
+    tp_separation = st.slider("TrackPy: Separation", 1, 50, separation, 2)
+    tp_percentile = st.slider("TrackPy: Percentile", 0, 100, confidence, 5)
+else:
+    tp_diameter = diameter
+    tp_minmass = minmass
+    tp_separation = separation
+    tp_percentile = confidence
+
 # Global log
 def reset_log():
     return pd.DataFrame(columns=["image_title", "dish_id", "num_plaques"])
@@ -121,9 +136,9 @@ if uploaded_files:
     image_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
     scale_factor = 1.0 / num_dishes
-    auto_diameter = max(5, int(diameter * scale_factor))
-    auto_separation = max(1, int(separation * scale_factor))
-    auto_minmass = max(1, int(minmass * scale_factor))
+    auto_diameter = max(5, int(tp_diameter * scale_factor))
+    auto_separation = max(1, int(tp_separation * scale_factor))
+    auto_minmass = max(1, int(tp_minmass * scale_factor))
 
     st.subheader(selected_name)
     display_overlay = image_rgb.copy()
@@ -142,7 +157,9 @@ if uploaded_files:
         dish_proc = preprocess_image(dish_crop.copy(), invert, contrast)
 
         # Detect plaques in cropped dish
-        dish_features = detect_features(dish_proc, auto_diameter, auto_minmass, auto_separation, confidence, use_tp=invert)
+        dish_features = detect_features(
+            dish_proc, auto_diameter, auto_minmass, auto_separation, tp_percentile, use_tp=not invert
+        )
         plaque_count = len(dish_features)
 
         # Re-project local dish coordinates back to global
