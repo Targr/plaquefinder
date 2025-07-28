@@ -22,7 +22,15 @@ separation = st.slider("Minimum Separation", 1, 30, 5, 1)
 confidence = st.slider("Percentile Confidence to Keep", 0, 100, 90, 1)
 num_dishes = st.slider("Number of dishes to detect", 1, 10, 1, 1)
 
-# Global log
+# === Colony Detection Mode ===
+colony_mode = st.checkbox("Enable Colony Detection Mode (for faint features on light background)", value=False)
+if colony_mode:
+    st.markdown("### Colony Detection Parameters")
+    colony_blur = st.slider("Colony Blur Kernel Size (odd only)", 1, 21, 7, 2)
+    colony_thresh_block = st.slider("Adaptive Threshold Block Size (odd only)", 3, 101, 31, 2)
+    colony_thresh_C = st.slider("Adaptive Threshold C-value", -30, 30, 5, 1)
+
+# === Global Log ===
 def reset_log():
     return pd.DataFrame(columns=["image_title", "dish_id", "num_plaques"])
 
@@ -38,7 +46,6 @@ def preprocess_image(img, invert=False, contrast=False):
     return img
 
 def enhanced_tp_locate(gray_img, diameter, minmass, separation, confidence):
-    # Apply a local contrast filter to emphasize spots
     norm_img = (gray_img / 255.0).astype(np.float32)
     blur = cv2.GaussianBlur(norm_img, (5, 5), 0)
     diff = cv2.absdiff(norm_img, blur)
@@ -56,6 +63,27 @@ def enhanced_tp_locate(gray_img, diameter, minmass, separation, confidence):
         features = pd.DataFrame()
     return features
 
+def detect_colonies(gray_img, blur_kernel=7, block_size=31, C=5):
+    blur_kernel = blur_kernel if blur_kernel % 2 == 1 else blur_kernel + 1
+    block_size = block_size if block_size % 2 == 1 else block_size + 1
+    blurred = cv2.GaussianBlur(gray_img, (blur_kernel, blur_kernel), 0)
+    thresh = cv2.adaptiveThreshold(
+        blurred, 255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV,
+        block_size, C
+    )
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    features = []
+    for cnt in contours:
+        if cv2.contourArea(cnt) > 5:
+            M = cv2.moments(cnt)
+            if M["m00"] != 0:
+                cx = int(M["m10"] / M["m00"])
+                cy = int(M["m01"] / M["m00"])
+                features.append({"x": cx, "y": cy})
+    return pd.DataFrame(features)
+
 def detect_multiple_dishes(gray, max_dishes):
     circles = cv2.HoughCircles(
         gray, cv2.HOUGH_GRADIENT, dp=1.2, minDist=gray.shape[0] // (max_dishes + 1),
@@ -71,10 +99,8 @@ def ellipse_mask_filter(features, cx, cy, rx, ry, angle_deg):
     angle_rad = np.deg2rad(angle_deg)
     dx = features['x'] - cx
     dy = features['y'] - cy
-
     x_rot = dx * np.cos(angle_rad) + dy * np.sin(angle_rad)
     y_rot = -dx * np.sin(angle_rad) + dy * np.cos(angle_rad)
-
     inside = (x_rot / rx)**2 + (y_rot / ry)**2 <= 1
     return features[inside]
 
@@ -84,7 +110,6 @@ if uploaded_files:
     selected_name = st.selectbox("Select image", file_names)
     selected_file = next(file for file in uploaded_files if file.name == selected_name)
 
-    # Load and optionally compress the image
     file_bytes = bytearray(selected_file.read())
     img_np = np.frombuffer(file_bytes, np.uint8)
     img = cv2.imdecode(img_np, cv2.IMREAD_COLOR)
@@ -98,13 +123,11 @@ if uploaded_files:
     image_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
     st.subheader(selected_name)
-
     dish_circles = detect_multiple_dishes(gray, num_dishes)
     new_rows = []
 
     if len(dish_circles) > 0:
         st.subheader(f"Detected {len(dish_circles)} dish(es)")
-
         for i, (cx, cy, cr) in enumerate(dish_circles):
             margin = int(cr * 1.1)
             x1 = max(0, cx - margin)
@@ -121,8 +144,9 @@ if uploaded_files:
             rx = ry = int(cr * 0.95)
             angle_deg = 0
 
-            # Use enhanced method if not inverted
-            if invert:
+            if colony_mode:
+                dish_features = detect_colonies(dish_proc, colony_blur, colony_thresh_block, colony_thresh_C)
+            elif invert:
                 dish_features = tp.locate(
                     (dish_proc / 255.0).astype(np.float32),
                     diameter=diameter, minmass=minmass, separation=separation,
@@ -145,7 +169,6 @@ if uploaded_files:
             count = len(masked_feats)
             cv2.putText(dish_overlay, f"Dish {i+1}: {count}", (10, 25),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-
             st.image(dish_overlay, caption=f"Dish {i+1}: {count} plaques", use_column_width=True)
 
             new_rows.append({
@@ -154,11 +177,16 @@ if uploaded_files:
                 "num_plaques": count
             })
     else:
-        features = tp.locate(
-            (proc / 255.0).astype(np.float32),
-            diameter=diameter, minmass=minmass, separation=separation,
-            percentile=confidence, invert=False
-        ) if invert else enhanced_tp_locate(proc, diameter, minmass, separation, confidence)
+        if colony_mode:
+            features = detect_colonies(proc, colony_blur, colony_thresh_block, colony_thresh_C)
+        elif invert:
+            features = tp.locate(
+                (proc / 255.0).astype(np.float32),
+                diameter=diameter, minmass=minmass, separation=separation,
+                percentile=confidence, invert=False
+            )
+        else:
+            features = enhanced_tp_locate(proc, diameter, minmass, separation, confidence)
 
         if features is None or features.empty:
             features = pd.DataFrame(columns=["x", "y"])
