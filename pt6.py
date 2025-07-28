@@ -30,6 +30,7 @@ num_dishes = st.slider("Number of dishes to detect", 1, 10, 1, 1)
 
 # === Utility Functions ===
 def preprocess_image(gray):
+    gray = cv2.resize(gray, (0, 0), fx=0.25, fy=0.25, interpolation=cv2.INTER_AREA)
     if adjust_contrast:
         gray = exposure.rescale_intensity(gray, out_range=(0, 255)).astype(np.uint8)
     if gamma != 1.0:
@@ -75,11 +76,10 @@ if uploaded_files:
         st.error("Could not load image.")
         st.stop()
 
+    image = cv2.resize(image, (0, 0), fx=0.25, fy=0.25, interpolation=cv2.INTER_AREA)
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     prepped = preprocess_image(gray)
     rgb_img = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
-    st.image(prepped, caption="Processed Input", use_column_width=True, channels="GRAY")
 
     dishes = detect_dishes(gray)
     output_data = []
