@@ -145,16 +145,12 @@ if uploaded_files:
             y1, y2 = max(cy - pad, 0), min(cy + pad, gray.shape[0])
             dish_crop = proc[y1:y2, x1:x2]
 
-            mask = np.zeros_like(dish_crop)
-            ellipse_center = (dish_crop.shape[1] // 2, dish_crop.shape[0] // 2)
-            ellipse_axes = (int(rx * 0.75), int(ry * 0.75))  # Shrink mask to reduce edge detection
-            cv2.ellipse(mask, ellipse_center, ellipse_axes, 0, 0, 360, 255, -1)
-            dish_crop_masked = cv2.bitwise_and(dish_crop, dish_crop, mask=mask)
+            # Use full crop — no ellipse mask
+            target_w, target_h = 2814, 2841
+            resized_crop = cv2.resize(dish_crop, (target_w, target_h), interpolation=cv2.INTER_CUBIC)
 
-            dish_h, dish_w = dish_crop_masked.shape[:2]
-            target_w = 800
-            scale_up = target_w / dish_w if dish_w > 0 else 1.0
-            resized_crop = cv2.resize(dish_crop_masked, (int(dish_w * scale_up), int(dish_h * scale_up)), interpolation=cv2.INTER_CUBIC)
+            scale_x = target_w / dish_crop.shape[1]
+            scale_y = target_h / dish_crop.shape[0]
 
             refined_feats = detect_features(
                 resized_crop,
@@ -165,8 +161,8 @@ if uploaded_files:
             )
 
             if refined_feats is not None and not refined_feats.empty:
-                refined_feats["x"] = refined_feats["x"] / scale_up + x1
-                refined_feats["y"] = refined_feats["y"] / scale_up + y1
+                refined_feats["x"] = refined_feats["x"] / scale_x + x1
+                refined_feats["y"] = refined_feats["y"] / scale_y + y1
                 new_rows[-1]["num_plaques"] = len(refined_feats)
 
                 for j, (_, row) in enumerate(refined_feats.iterrows()):
