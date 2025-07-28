@@ -124,10 +124,17 @@ if uploaded_files:
         cv2.ellipse(display_overlay, (cx, cy), (rx, ry), 0, 0, 360, (255, 0, 0), 2)
         dish_feats = ellipse_mask_filter(features, cx, cy, rx, ry, angle_deg=0)
 
-        for _, row in dish_feats.iterrows():
+        for j, (_, row) in enumerate(dish_feats.iterrows()):
             x, y = int(round(row["x"])), int(round(row["y"]))
             cv2.circle(display_overlay, (x, y), auto_diameter // 2, (0, 255, 0), 1)
             cv2.circle(display_overlay, (x, y), 2, (255, 0, 0), -1)
+    
+    plaque_id = f"D{i+1}_P{j+1}"
+    cv2.putText(display_overlay, plaque_id, (x + 5, y - 5),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 0), 2, cv2.LINE_AA)
+    cv2.putText(display_overlay, plaque_id, (x + 5, y - 5),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
+
 
         plaque_count = len(dish_feats)
         new_rows.append({"image_title": selected_name, "dish_id": f"Dish {i+1}", "num_plaques": plaque_count})
