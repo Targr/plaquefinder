@@ -173,52 +173,59 @@ if uploaded_files:
     csv = st.session_state.plaque_log.to_csv(index=False).encode("utf-8")
     st.download_button("Download CSV", data=csv, file_name="plaque_counts.csv", mime="text/csv")
 
-    # === NEW FEATURE: Color-Based Matching of Plaques ===
-    st.markdown("---")
-    st.subheader("Optional: Match Plaques by Color")
+# === COMPLETELY INDEPENDENT COLOR MATCH TOOL ===
+st.markdown("---")
+st.subheader("Color Finder (Independent)")
 
-    enable_color_match = st.checkbox("Enable color-based plaque matcher", value=False)
-    color_tolerance = st.slider("Color similarity tolerance", 0, 100, 30, 1)
+enable_color_tool = st.checkbox("Enable standalone color picker", value=False)
+color_tolerance_slider = st.slider("Color distance tolerance", 0, 255, 40, 1)
 
-    if enable_color_match:
-        # Resize overlay to fit canvas
-        canvas_height, canvas_width = display_overlay_resized.shape[:2]
+if enable_color_tool:
+    if uploaded_files:
+        # Resize original image for canvas
+        rgb_for_canvas, _ = resize_with_scale(image_rgb.copy())
+        h, w = rgb_for_canvas.shape[:2]
+
+        # Draw canvas for user to click a point
         canvas_result = st_canvas(
             fill_color="rgba(255, 255, 255, 0.3)",
-            stroke_width=3,
-            background_image=Image.fromarray(display_overlay_resized),
+            stroke_width=5,
+            background_image=Image.fromarray(rgb_for_canvas),
             update_streamlit=True,
-            height=canvas_height,
-            width=canvas_width,
+            height=h,
+            width=w,
             drawing_mode="point",
-            key="color_selector_canvas"
+            key="color_picker_canvas"
         )
 
+        # Process the click
         if canvas_result.json_data and len(canvas_result.json_data["objects"]) > 0:
-            # Get last clicked point
             point = canvas_result.json_data["objects"][-1]
-            cx_raw = point["left"]
-            cy_raw = point["top"]
+            x_click = int(point["left"])
+            y_click = int(point["top"])
 
-            # Map to original image scale
-            cx = int(cx_raw * image_rgb.shape[1] / canvas_width)
-            cy = int(cy_raw * image_rgb.shape[0] / canvas_height)
+            # Convert canvas coordinates to full-res image coordinates
+            x_orig = int(x_click * image_rgb.shape[1] / w)
+            y_orig = int(y_click * image_rgb.shape[0] / h)
 
-            # Get clicked color (as reference)
-            selected_rgb = image_rgb[cy, cx]
+            if 0 <= x_orig < image_rgb.shape[1] and 0 <= y_orig < image_rgb.shape[0]:
+                selected_color = image_rgb[y_orig, x_orig].astype(np.int16)
 
-            # Prepare overlay image
-            color_overlay = image_rgb.copy()
-            matched_points = []
+                # Show selected color
+                st.markdown(f"**Selected color:** RGB({selected_color[0]}, {selected_color[1]}, {selected_color[2]})")
+                st.color_picker("Preview", value=f"#{selected_color[0]:02x}{selected_color[1]:02x}{selected_color[2]:02x}".upper(), label_visibility="collapsed", disabled=True)
 
-            for _, row in features.iterrows():
-                x, y = int(row["x"]), int(row["y"])
-                if 0 <= y < image_rgb.shape[0] and 0 <= x < image_rgb.shape[1]:
-                    pixel_rgb = image_rgb[y, x]
-                    diff = np.linalg.norm(pixel_rgb.astype(np.int16) - selected_rgb.astype(np.int16))
-                    if diff <= color_tolerance:
-                        matched_points.append((x, y))
-                        cv2.circle(color_overlay, (x, y), 5, (0, 255, 255), 2)  # Yellow highlight
+                # Find all matching pixels
+                diff_img = np.linalg.norm(image_rgb.astype(np.int16) - selected_color, axis=2)
+                match_mask = diff_img <= color_tolerance_slider
 
-            color_overlay_resized, _ = resize_with_scale(color_overlay)
-            st.image(color_overlay_resized, caption=f"{len(matched_points)} matched plaques by color")
+                # Overlay yellow on matched pixels
+                highlight_img = image_rgb.copy()
+                highlight_img[match_mask] = [255, 255, 0]  # Yellow highlight
+
+                # Show result
+                highlight_resized, _ = resize_with_scale(highlight_img)
+                st.image(highlight_resized, caption="Pixels matching selected color")
+
+    else:
+        st.info("Upload an image first to use the color picker.")
