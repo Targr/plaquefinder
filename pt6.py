@@ -37,11 +37,15 @@ def preprocess_image(img, invert=False, contrast=False):
         img = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX)
     return img
 
-def detect_features(gray_img, diameter, minmass, separation, confidence):
+def enhanced_tp_locate(gray_img, diameter, minmass, separation, confidence):
+    # Apply a local contrast filter to emphasize spots
     norm_img = (gray_img / 255.0).astype(np.float32)
+    blur = cv2.GaussianBlur(norm_img, (5, 5), 0)
+    diff = cv2.absdiff(norm_img, blur)
+    enhanced = cv2.normalize(diff, None, 0, 1.0, cv2.NORM_MINMAX)
     try:
         features = tp.locate(
-            norm_img,
+            enhanced,
             diameter=diameter,
             minmass=minmass,
             separation=separation,
@@ -102,7 +106,6 @@ if uploaded_files:
         st.subheader(f"Detected {len(dish_circles)} dish(es)")
 
         for i, (cx, cy, cr) in enumerate(dish_circles):
-            # Crop a square region around the dish
             margin = int(cr * 1.1)
             x1 = max(0, cx - margin)
             x2 = min(img.shape[1], cx + margin)
@@ -113,21 +116,26 @@ if uploaded_files:
             dish_proc = preprocess_image(dish_gray, invert, contrast)
             dish_overlay = cv2.cvtColor(dish_crop, cv2.COLOR_BGR2RGB)
 
-            # Adjust ellipse center for the cropped image
             cx_adj = cx - x1
             cy_adj = cy - y1
             rx = ry = int(cr * 0.95)
             angle_deg = 0
 
-            # Detect all features in crop
-            dish_features = detect_features(dish_proc, diameter, minmass, separation, confidence)
+            # Use enhanced method if not inverted
+            if invert:
+                dish_features = tp.locate(
+                    (dish_proc / 255.0).astype(np.float32),
+                    diameter=diameter, minmass=minmass, separation=separation,
+                    percentile=confidence, invert=False
+                )
+            else:
+                dish_features = enhanced_tp_locate(dish_proc, diameter, minmass, separation, confidence)
+
             if dish_features is None or dish_features.empty:
                 dish_features = pd.DataFrame(columns=["x", "y"])
 
-            # Ellipse mask
             masked_feats = ellipse_mask_filter(dish_features, cx_adj, cy_adj, rx, ry, angle_deg)
 
-            # Draw ellipse and features
             cv2.ellipse(dish_overlay, (cx_adj, cy_adj), (rx, ry), angle_deg, 0, 360, (255, 0, 0), 2)
             for _, row in masked_feats.iterrows():
                 x, y = int(round(row["x"])), int(round(row["y"]))
@@ -138,18 +146,20 @@ if uploaded_files:
             cv2.putText(dish_overlay, f"Dish {i+1}: {count}", (10, 25),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
-            # Display
             st.image(dish_overlay, caption=f"Dish {i+1}: {count} plaques", use_column_width=True)
 
-            # Log
             new_rows.append({
                 "image_title": f"{selected_name} (Dish {i+1})",
                 "dish_id": f"Dish {i+1}",
                 "num_plaques": count
             })
     else:
-        # No dish detected — fallback to whole image
-        features = detect_features(proc, diameter, minmass, separation, confidence)
+        features = tp.locate(
+            (proc / 255.0).astype(np.float32),
+            diameter=diameter, minmass=minmass, separation=separation,
+            percentile=confidence, invert=False
+        ) if invert else enhanced_tp_locate(proc, diameter, minmass, separation, confidence)
+
         if features is None or features.empty:
             features = pd.DataFrame(columns=["x", "y"])
         display_overlay = image_rgb.copy()
@@ -169,15 +179,13 @@ if uploaded_files:
             "num_plaques": count
         })
 
-    # Update session log
     st.session_state.plaque_log = st.session_state.plaque_log[
-        ~((st.session_state.plaque_log.image_title.str.startswith(selected_name)))
+        ~(st.session_state.plaque_log.image_title.str.startswith(selected_name))
     ]
     st.session_state.plaque_log = pd.concat([
         st.session_state.plaque_log,
         pd.DataFrame(new_rows)
     ], ignore_index=True)
 
-    # CSV export
     csv = st.session_state.plaque_log.to_csv(index=False).encode("utf-8")
     st.download_button("Download CSV", data=csv, file_name="plaque_counts.csv", mime="text/csv")
