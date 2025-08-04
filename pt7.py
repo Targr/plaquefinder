@@ -45,13 +45,13 @@ def ellipse_mask_filter(features, cx, cy, rx, ry):
     inside = ((dx / rx) ** 2 + (dy / ry) ** 2) <= 1
     return features[inside]
 
-# Session init
+# Session state init
 if "plaque_log" not in st.session_state:
     st.session_state.plaque_log = pd.DataFrame(columns=["image_title", "ellipse_id", "num_plaques"])
+if "ellipse_state" not in st.session_state:
+    st.session_state.ellipse_state = None
 if "ellipse_initialized" not in st.session_state:
     st.session_state.ellipse_initialized = False
-if "ellipse_state" not in st.session_state:
-    st.session_state.ellipse_state = None  # Placeholder
 
 if mobile_file:
     file_bytes = np.asarray(bytearray(mobile_file.read()), dtype=np.uint8)
@@ -74,7 +74,7 @@ if mobile_file:
         features = pd.DataFrame(columns=["x", "y"])
 
     # Initialize ellipse once
-    if not st.session_state.ellipse_initialized:
+    if not st.session_state.ellipse_initialized or st.session_state.ellipse_state is None:
         st.session_state.ellipse_state = {
             "type": "ellipse",
             "left": canvas_w // 4,
@@ -88,8 +88,8 @@ if mobile_file:
         }
         st.session_state.ellipse_initialized = True
 
-    # Assemble canvas objects
-    canvas_objects = [st.session_state.ellipse_state]
+    # Assemble overlay objects: always include current ellipse
+    canvas_objects = [st.session_state.ellipse_state.copy()]
     for _, row in features.iterrows():
         canvas_objects.append({
             "type": "circle",
@@ -102,8 +102,8 @@ if mobile_file:
             "selectable": False
         })
 
-    # Draw the canvas — pass initial_drawing only once
-    canvas_kwargs = dict(
+    # Draw canvas (no flickering: skip initial_drawing after first run)
+    canvas_result = st_canvas(
         fill_color="rgba(255, 255, 255, 0)",
         stroke_width=3,
         stroke_color="#FF0000",
@@ -112,22 +112,21 @@ if mobile_file:
         height=canvas_h,
         width=canvas_w,
         drawing_mode="transform",
+        initial_drawing=None if st.session_state.get("canvas_used") else {
+            "version": "4.4.0",
+            "objects": canvas_objects
+        },
         key="ellipse_canvas"
     )
+    st.session_state["canvas_used"] = True  # Only skip initial drawing after first run
 
-    if not st.session_state.get("ellipse_used_once"):
-        canvas_kwargs["initial_drawing"] = {"version": "4.4.0", "objects": canvas_objects}
-        st.session_state["ellipse_used_once"] = True
-
-    canvas_result = st_canvas(**canvas_kwargs)
-
-    # Update ellipse only if user modified it
+    # Capture latest ellipse from canvas (if any)
     if canvas_result.json_data and "objects" in canvas_result.json_data:
         ellipses = [obj for obj in canvas_result.json_data["objects"] if obj.get("type") == "ellipse"]
         if ellipses:
             st.session_state.ellipse_state = ellipses[-1]
 
-    # Geometry from ellipse
+    # Compute ellipse geometry
     ellipse = st.session_state.ellipse_state
     left = ellipse.get("left", canvas_w // 4)
     top = ellipse.get("top", canvas_h // 4)
@@ -138,10 +137,10 @@ if mobile_file:
     cx = left + width / 2
     cy = top + height / 2
 
-    # Count features in ellipse
+    # Filter features within ellipse
     mask_feats = ellipse_mask_filter(features, cx, cy, rx, ry)
 
-    # Live count
+    # Display live count
     st.markdown("### Live Plaque Count")
     st.write(f"Ellipse 1: **{len(mask_feats)} plaques detected**")
 
@@ -158,6 +157,6 @@ if mobile_file:
         }])
     ], ignore_index=True)
 
-    # CSV download
+    # Export CSV
     csv = st.session_state.plaque_log.to_csv(index=False).encode("utf-8")
     st.download_button("Download CSV", data=csv, file_name="plaque_counts.csv", mime="text/csv")
