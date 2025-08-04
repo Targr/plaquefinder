@@ -9,6 +9,7 @@ import trackpy as tp
 st.set_page_config(layout="wide")
 st.title("Touch-Friendly Plaque Counter")
 
+# Upload and parameter UI
 mobile_file = st.file_uploader("Take a photo of a dish", type=["png", "jpg", "jpeg"])
 advanced = st.checkbox("Advanced Settings")
 
@@ -18,6 +19,7 @@ minmass = st.slider("Minimum Mass", 1, 100, 10, 1)
 confidence = st.slider("Percentile Confidence to Keep", 0, 100, 90, 1)
 separation = st.slider("Minimum Separation", 1, 30, 5, 1) if advanced else None
 
+# Helper functions
 def preprocess_image(img, invert=False):
     if invert:
         img = cv2.bitwise_not(img)
@@ -45,66 +47,67 @@ def ellipse_mask_filter(features, cx, cy, rx, ry):
     inside = ((dx / rx) ** 2 + (dy / ry) ** 2) <= 1
     return features[inside]
 
-# Session state init
-if "plaque_log" not in st.session_state:
-    st.session_state.plaque_log = pd.DataFrame(columns=["image_title", "ellipse_id", "num_plaques"])
+# Init persistent ellipse
 if "ellipse_state" not in st.session_state:
     st.session_state.ellipse_state = None
-if "ellipse_initialized" not in st.session_state:
-    st.session_state.ellipse_initialized = False
 
 if mobile_file:
+    # Load image and shrink if needed
     file_bytes = np.asarray(bytearray(mobile_file.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-
     while img.nbytes > 1_000_000:
         h, w = img.shape[:2]
         img = cv2.resize(img, (int(w * 0.8), int(h * 0.8)), interpolation=cv2.INTER_AREA)
 
-    # Preprocess image
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     proc = preprocess_image(gray, invert)
-    image_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    pil_image = Image.fromarray(image_rgb)
+    rgb_image = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    pil_image = Image.fromarray(rgb_image)
     canvas_w, canvas_h = pil_image.size
 
-    # Detect features
-    features = detect_features(proc, diameter, minmass, separation, confidence)
-    if features is None or features.empty:
-        features = pd.DataFrame(columns=["x", "y"])
-
-    # Initialize ellipse once
-    if not st.session_state.ellipse_initialized or st.session_state.ellipse_state is None:
+    # Set ellipse default if not yet initialized
+    if st.session_state.ellipse_state is None:
         st.session_state.ellipse_state = {
             "type": "ellipse",
             "left": canvas_w // 4,
             "top": canvas_h // 4,
-            "rx": canvas_w // 6,
-            "ry": canvas_h // 6,
+            "width": canvas_w // 2,
+            "height": canvas_h // 2,
             "fill": "rgba(255,255,255,0)",
             "stroke": "#FF0000",
             "strokeWidth": 3,
             "angle": 0
         }
-        st.session_state.ellipse_initialized = True
 
-    # Assemble overlay objects: always include current ellipse
-    canvas_objects = [st.session_state.ellipse_state.copy()]
-    for _, row in features.iterrows():
-        canvas_objects.append({
+    # Detect plaques
+    features = detect_features(proc, diameter, minmass, separation, confidence)
+    if features is None or features.empty:
+        features = pd.DataFrame(columns=["x", "y"])
+
+    # Parse ellipse center/radii
+    ellipse = st.session_state.ellipse_state
+    cx = ellipse["left"] + ellipse["width"] / 2
+    cy = ellipse["top"] + ellipse["height"] / 2
+    rx = ellipse["width"] / 2
+    ry = ellipse["height"] / 2
+
+    # Draw canvas objects
+    objects = [ellipse] + [
+        {
             "type": "circle",
             "left": float(row["x"]) - 3,
             "top": float(row["y"]) - 3,
             "radius": 3,
-            "fill": "rgba(50,255,50,0.9)",  # lime green
+            "fill": "rgba(0,255,0,0.9)",
             "stroke": "#003300",
             "strokeWidth": 1,
             "selectable": False
-        })
+        }
+        for _, row in features.iterrows()
+    ]
 
-    # Draw canvas (no flickering: skip initial_drawing after first run)
     canvas_result = st_canvas(
-        fill_color="rgba(255, 255, 255, 0)",
+        fill_color="rgba(255,255,255,0)",
         stroke_width=3,
         stroke_color="#FF0000",
         background_image=pil_image,
@@ -112,51 +115,26 @@ if mobile_file:
         height=canvas_h,
         width=canvas_w,
         drawing_mode="transform",
-        initial_drawing=None if st.session_state.get("canvas_used") else {
-            "version": "4.4.0",
-            "objects": canvas_objects
-        },
+        initial_drawing={"version": "4.4.0", "objects": objects},
         key="ellipse_canvas"
     )
-    st.session_state["canvas_used"] = True  # Only skip initial drawing after first run
 
-    # Capture latest ellipse from canvas (if any)
+    # Capture new ellipse only if changed
     if canvas_result.json_data and "objects" in canvas_result.json_data:
-        ellipses = [obj for obj in canvas_result.json_data["objects"] if obj.get("type") == "ellipse"]
-        if ellipses:
-            st.session_state.ellipse_state = ellipses[-1]
+        for obj in canvas_result.json_data["objects"]:
+            if obj.get("type") == "ellipse":
+                st.session_state.ellipse_state = obj
+                break
 
-    # Compute ellipse geometry
+    # Re-parse ellipse after potential update
     ellipse = st.session_state.ellipse_state
-    left = ellipse.get("left", canvas_w // 4)
-    top = ellipse.get("top", canvas_h // 4)
-    rx = ellipse.get("rx", canvas_w // 6)
-    ry = ellipse.get("ry", canvas_h // 6)
-    width = ellipse.get("width", 2 * rx)
-    height = ellipse.get("height", 2 * ry)
-    cx = left + width / 2
-    cy = top + height / 2
+    cx = ellipse["left"] + ellipse["width"] / 2
+    cy = ellipse["top"] + ellipse["height"] / 2
+    rx = ellipse["width"] / 2
+    ry = ellipse["height"] / 2
 
-    # Filter features within ellipse
-    mask_feats = ellipse_mask_filter(features, cx, cy, rx, ry)
+    # Count features inside ellipse
+    inside_features = ellipse_mask_filter(features, cx, cy, rx, ry)
 
-    # Display live count
     st.markdown("### Live Plaque Count")
-    st.write(f"Ellipse 1: **{len(mask_feats)} plaques detected**")
-
-    # Update session log
-    st.session_state.plaque_log = st.session_state.plaque_log[
-        st.session_state.plaque_log.image_title != mobile_file.name
-    ]
-    st.session_state.plaque_log = pd.concat([
-        st.session_state.plaque_log,
-        pd.DataFrame([{
-            "image_title": mobile_file.name,
-            "ellipse_id": "Ellipse 1",
-            "num_plaques": len(mask_feats)
-        }])
-    ], ignore_index=True)
-
-    # Export CSV
-    csv = st.session_state.plaque_log.to_csv(index=False).encode("utf-8")
-    st.download_button("Download CSV", data=csv, file_name="plaque_counts.csv", mime="text/csv")
+    st.success(f"{len(inside_features)} plaques detected inside selected region")
