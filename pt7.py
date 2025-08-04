@@ -5,7 +5,6 @@ import numpy as np
 import pandas as pd
 from PIL import Image
 import trackpy as tp
-import json
 
 st.set_page_config(layout="wide")
 st.title("Touch-Friendly Plaque Counter")
@@ -64,7 +63,6 @@ if mobile_file:
     pil_image = Image.fromarray(image_rgb)
     canvas_w, canvas_h = pil_image.size
 
-    # Define a starting ellipse for transform mode
     initial_shape = {
         "version": "4.4.0",
         "objects": [
@@ -82,7 +80,6 @@ if mobile_file:
         ]
     }
 
-    # Display the canvas
     st.markdown("Move and resize the red ellipse to select a dish region.")
     canvas_result = st_canvas(
         fill_color="rgba(255, 255, 255, 0)",
@@ -93,7 +90,7 @@ if mobile_file:
         height=canvas_h,
         width=canvas_w,
         drawing_mode="transform",
-        initial_drawing=(initial_shape),
+        initial_drawing=initial_shape,
         key="ellipse_canvas"
     )
 
@@ -104,6 +101,7 @@ if mobile_file:
             features = features if features is not None else pd.DataFrame(columns=["x", "y"])
 
             new_rows = []
+            st.markdown("### Plaque Counts")
             for i, obj in enumerate(objs):
                 if obj["type"] == "ellipse":
                     left = obj["left"]
@@ -117,6 +115,8 @@ if mobile_file:
 
                     mask_feats = ellipse_mask_filter(features, cx, cy, rx, ry)
                     count = len(mask_feats)
+
+                    st.write(f"Ellipse {i+1}: **{count} plaques detected**")
                     new_rows.append({
                         "image_title": mobile_file.name,
                         "ellipse_id": f"Ellipse {i + 1}",
@@ -127,8 +127,6 @@ if mobile_file:
                 st.session_state.plaque_log,
                 pd.DataFrame(new_rows)
             ], ignore_index=True)
-
-            st.success(f"{len(new_rows)} region(s) analyzed. See CSV below.")
 
     csv = st.session_state.plaque_log.to_csv(index=False).encode("utf-8")
     st.download_button("Download CSV", data=csv, file_name="plaque_counts.csv", mime="text/csv")
