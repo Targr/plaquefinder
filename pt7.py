@@ -7,7 +7,7 @@ from PIL import Image
 import trackpy as tp
 
 st.set_page_config(layout="wide")
-st.title("Plaque Counter with Locked ROI")
+st.title("Plaque Counter with Locked ROI - Pixel-Perfect Fidelity")
 
 # Upload + parameters
 uploaded_file = st.file_uploader("Upload a petri dish photo", type=["png", "jpg", "jpeg"])
@@ -64,24 +64,25 @@ def detect_dish(gray_img):
     return None
 
 def extract_circle_geometry(obj):
+    """Extract exact circle center and radius in pixels from canvas object, including scale."""
     raw_r = obj.get("radius", 50)
     left = obj.get("left", 0)
     top = obj.get("top", 0)
     scale_x = obj.get("scaleX", 1.0)
     scale_y = obj.get("scaleY", 1.0)
+    # Average scale in x and y directions for radius scaling
     scale = (scale_x + scale_y) / 2
     r = raw_r * scale
-    x = left + raw_r
-    y = top + raw_r
+    x = left + raw_r  # center x in pixels (relative to canvas)
+    y = top + raw_r   # center y in pixels
     return x, y, r
 
 if uploaded_file:
+    # Load original image bytes, do NOT resize for fidelity
     file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-    while img.nbytes > 1_000_000:
-        h, w = img.shape[:2]
-        img = cv2.resize(img, (int(w * 0.8), int(h * 0.8)), interpolation=cv2.INTER_AREA)
 
+    # Work with original resolution to maintain fidelity:
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     proc = preprocess_image(gray, invert)
     rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -90,8 +91,8 @@ if uploaded_file:
 
     overlay_objects = []
 
+    # Editable or locked circle
     if st.session_state.locked_circle_obj is None or st.session_state.edit_mode:
-        # Editable mode
         if st.session_state.locked_circle_obj is None:
             detected = detect_dish(gray)
             if detected is None:
@@ -118,21 +119,21 @@ if uploaded_file:
         circle_obj["selectable"] = False
         overlay_objects.append(circle_obj)
 
-    # Geometry
+    # Extract exact pixel geometry from circle object (canvas coords)
     x0, y0, r = extract_circle_geometry(circle_obj)
 
-    # Detect features on full image
+    # Detect plaques on full image with no masking for fidelity
     features = detect_features(proc, diameter, minmass, separation, confidence)
     if features is None or features.empty:
         features = pd.DataFrame(columns=["x", "y"])
 
-    # Post-process: remove anything outside ROI
+    # Post-filter to only those strictly inside the EXACT circle shown on canvas
     dx = features['x'] - x0
     dy = features['y'] - y0
     inside = (dx ** 2 + dy ** 2) <= r ** 2
     inside_features = features[inside]
 
-    # Show green dots only for inside ones
+    # Add green dots exactly where features are detected inside the circle
     for _, row in inside_features.iterrows():
         overlay_objects.append({
             "type": "circle",
@@ -145,7 +146,7 @@ if uploaded_file:
             "selectable": False
         })
 
-    # Draw canvas
+    # Draw the canvas at the exact original resolution and size
     canvas_result = st_canvas(
         fill_color="rgba(255,255,255,0)",
         stroke_width=3,
@@ -159,7 +160,7 @@ if uploaded_file:
         key="editable"
     )
 
-    # Lock button
+    # Lock button is always available in editing mode
     if st.session_state.locked_circle_obj is None or st.session_state.edit_mode:
         if st.button("Done (Lock Circle)"):
             for obj in canvas_result.json_data["objects"]:
@@ -168,6 +169,6 @@ if uploaded_file:
                     st.session_state.edit_mode = False
                     st.experimental_rerun()
 
-    # Final output
+    # Display plaque count strictly inside the exact visible ROI
     st.markdown("### Plaque Count Inside Circle")
     st.success(f"{len(inside_features)} plaques detected inside ROI")
