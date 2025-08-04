@@ -5,64 +5,88 @@ import numpy as np
 import pandas as pd
 from PIL import Image
 import trackpy as tp
+import json
+import os
 
 st.set_page_config(layout="wide")
 st.title("Plaque Counter with Locked ROI")
 
-# Upload + parameters
+# Parameter persistence
+PARAMS_FILE = "saved_parameters.json"
+
+def load_saved_params():
+    if os.path.exists(PARAMS_FILE):
+        with open(PARAMS_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+def save_params(name, params):
+    all_params = load_saved_params()
+    all_params[name] = params
+    with open(PARAMS_FILE, "w") as f:
+        json.dump(all_params, f)
+
+saved_param_sets = load_saved_params()
+
+# --- Upload + parameter control ---
 uploaded_file = st.file_uploader("Upload a petri dish photo", type=["png", "jpg", "jpeg", "tiff", "tif"])
 advanced = st.checkbox("Advanced Settings")
 
-# --- Colony or Plaque (Invert toggle) ---
-mode = st.radio("Image Type", options=["Colony", "Plaque"], index=1, horizontal=True)
+# Invert toggle renamed to 'Mode'
+mode = st.radio("Detection Mode", ["Colony", "Plaque"], horizontal=True)
 invert = mode == "Plaque"
 
-# --- Parameter Sliders ---
-slider_kwargs = dict(label_visibility="visible" if advanced else "collapsed")
-diameter = st.slider("Feature Diameter", 5, 51, 15, 2, **slider_kwargs)
-minmass = st.slider("Minimum Mass", 1, 100, 10, 1, **slider_kwargs)
-confidence = st.slider("Percentile Confidence to Keep", 0, 100, 90, 1, **slider_kwargs)
-separation = st.slider("Minimum Separation", 1, 30, 5, 1, **slider_kwargs) if advanced else None
+label_vis = "visible"
+value_vis = "visible" if advanced else "collapsed"
 
-# --- Parameter Saving & Loading ---
-if "saved_param_sets" not in st.session_state:
-    st.session_state.saved_param_sets = {}
+# Load named parameter sets
+param_names = list(saved_param_sets.keys())
+selected_param = st.selectbox("Load Saved Parameters", ["<None>"] + param_names)
 
-st.markdown("#### Save or Load Parameter Sets")
-with st.expander("🔧 Manage Parameter Sets", expanded=False):
-    param_name = st.text_input("Save current parameters as:")
-    if st.button("Save Parameters"):
-        if param_name:
-            st.session_state.saved_param_sets[param_name] = {
-                "invert": invert,
-                "diameter": diameter,
-                "minmass": minmass,
-                "confidence": confidence,
-                "separation": separation,
-            }
-            st.success(f"Saved as '{param_name}'")
-        else:
-            st.warning("Please enter a name to save the parameters.")
+if selected_param != "<None>":
+    preset = saved_param_sets[selected_param]
+    diameter = preset.get("diameter", 15)
+    minmass = preset.get("minmass", 10)
+    confidence = preset.get("confidence", 90)
+    separation = preset.get("separation", 5)
+else:
+    diameter = 15
+    minmass = 10
+    confidence = 90
+    separation = 5
 
-    if st.session_state.saved_param_sets:
-        selected = st.selectbox("Load saved parameters", options=["Select..."] + list(st.session_state.saved_param_sets.keys()))
-        if selected != "Select...":
-            params = st.session_state.saved_param_sets[selected]
-            invert = params["invert"]
-            diameter = params["diameter"]
-            minmass = params["minmass"]
-            confidence = params["confidence"]
-            separation = params["separation"]
-            # Update mode toggle accordingly
-            mode = "Plaque" if invert else "Colony"
-            st.success(f"Loaded parameters: '{selected}'")
+# UI sliders
+diameter = st.slider("Feature Diameter", 5, 51, diameter, 2,
+                     label_visibility=label_vis, value_visibility=value_vis)
+minmass = st.slider("Minimum Mass", 1, 100, minmass, 1,
+                    label_visibility=label_vis, value_visibility=value_vis)
+confidence = st.slider("Percentile Confidence to Keep", 0, 100, confidence, 1,
+                       label_visibility=label_vis, value_visibility=value_vis)
+separation = st.slider("Minimum Separation", 1, 30, separation, 1,
+                       label_visibility=label_vis, value_visibility=value_vis) if advanced else separation
 
-# --- Session state for ROI ---
+# Save params UI
+st.markdown("**Save Current Parameters**")
+new_param_name = st.text_input("Name for Saved Parameters")
+if st.button("Save Parameters"):
+    if new_param_name.strip():
+        save_params(new_param_name.strip(), {
+            "diameter": diameter,
+            "minmass": minmass,
+            "confidence": confidence,
+            "separation": separation
+        })
+        st.success(f"Parameters saved as '{new_param_name.strip()}'. Please refresh to see in list.")
+    else:
+        st.error("Please enter a valid name to save.")
+
+# Session state
 if "locked_circle_obj" not in st.session_state:
     st.session_state.locked_circle_obj = None
 if "edit_mode" not in st.session_state:
     st.session_state.edit_mode = True
 
+# --- Image Processing Functions ---
 def preprocess_image(img, invert=False):
     if invert:
         img = cv2.bitwise_not(img)
@@ -107,13 +131,13 @@ def extract_circle_geometry(obj):
     top = obj.get("top", 0)
     scale_x = obj.get("scaleX", 1.0)
     scale_y = obj.get("scaleY", 1.0)
-
     scale = (scale_x + scale_y) / 2
     r = raw_r * scale
     x = left + raw_r * scale_x
     y = top + raw_r * scale_y
     return x, y, r
 
+# --- Main Image Workflow ---
 if uploaded_file:
     file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
@@ -148,37 +172,35 @@ if uploaded_file:
                 "selectable": True
             }
         else:
-            # Allow re-editing
             circle_obj = st.session_state.locked_circle_obj.copy()
             circle_obj["selectable"] = True
 
-        overlay_objects = [circle_obj]  # Clear all others
+        overlay_objects = [circle_obj]
     else:
-        # Locked mode, use only final locked circle
+        # Locked ROI
         circle_obj = st.session_state.locked_circle_obj.copy()
         circle_obj["selectable"] = False
         overlay_objects = [circle_obj]
 
-    # Get geometry of the final/locked circle
     x0, y0, r = extract_circle_geometry(circle_obj)
 
-    # Create circle mask
+    # Circle mask
     yy, xx = np.ogrid[:h, :w]
     circle_mask = (xx - x0)**2 + (yy - y0)**2 <= r**2
 
-    # Detect all features
+    # Feature detection
     features = detect_features(proc, diameter, minmass, separation, confidence)
     if features is None or features.empty:
         features = pd.DataFrame(columns=["x", "y"])
 
-    # Filter by circle mask
+    # Keep features inside ROI
     inside_features = features.copy()
     fx = inside_features["x"].astype(int)
     fy = inside_features["y"].astype(int)
     inside = circle_mask[fy.clip(0, h-1), fx.clip(0, w-1)]
     inside_features = inside_features[inside]
 
-    # Add overlay dots
+    # Dot overlay
     for _, row in inside_features.iterrows():
         overlay_objects.append({
             "type": "circle",
@@ -191,7 +213,7 @@ if uploaded_file:
             "selectable": False
         })
 
-    # Show canvas
+    # Draw canvas
     canvas_result = st_canvas(
         fill_color="rgba(255,255,255,0)",
         stroke_width=3,
@@ -205,15 +227,14 @@ if uploaded_file:
         key="editable"
     )
 
-    # Lock in the drawn circle
+    # Lock ROI
     if st.session_state.locked_circle_obj is None or st.session_state.edit_mode:
         if st.button("Done (Lock Circle)"):
             locked_circle = None
             for obj in canvas_result.json_data.get("objects", []):
                 if obj["type"] == "circle" and obj.get("selectable", True):
                     locked_circle = obj
-                    break  # Only one allowed
-
+                    break
             if locked_circle is not None:
                 st.session_state.locked_circle_obj = locked_circle
                 st.session_state.edit_mode = False
@@ -221,13 +242,13 @@ if uploaded_file:
             else:
                 st.error("No valid circle found. Please draw one.")
 
-    # Optional: Reset ROI
+    # Reset ROI
     if not st.session_state.edit_mode:
         if st.button("Reset ROI"):
             st.session_state.locked_circle_obj = None
             st.session_state.edit_mode = True
             st.experimental_rerun()
 
-    # Final count output
+    # Final output
     st.markdown("### Plaque Count Inside Circle")
     st.success(f"{len(inside_features)} plaques detected inside ROI")
