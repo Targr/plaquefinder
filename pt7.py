@@ -93,7 +93,7 @@ if mobile_file:
         height=canvas_h,
         width=canvas_w,
         drawing_mode="transform",
-        initial_drawing=json.dumps(initial_shape),
+        initial_drawing=(initial_shape),
         key="ellipse_canvas"
     )
 
