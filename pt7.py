@@ -148,12 +148,12 @@ st.write(f"Ellipse 1: **{len(mask_feats)} plaques detected**")
 st.session_state.plaque_log = st.session_state.plaque_log[
     st.session_state.plaque_log.image_title != mobile_file.name
     ]
-    st.session_state.plaque_log = pd.concat([
-        st.session_state.plaque_log,
-        pd.DataFrame([{
-            "image_title": mobile_file.name,
-            "ellipse_id": "Ellipse 1",
-            "num_plaques": len(mask_feats)
+st.session_state.plaque_log = pd.concat([
+    st.session_state.plaque_log,
+    pd.DataFrame([{
+        "image_title": mobile_file.name,
+        "ellipse_id": "Ellipse 1",
+        "num_plaques": len(mask_feats)
         }])
     ], ignore_index=True)
 
