@@ -24,6 +24,8 @@ def preprocess_image(img, invert=False):
     img = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX)
     return img
 
+proc = preprocess_image(gray, invert)
+
 def detect_features(gray, diameter, minmass, separation, confidence):
     norm_img = (gray / 255.0).astype(np.float32)
     try:
@@ -57,7 +59,6 @@ if mobile_file:
         img = cv2.resize(img, (int(w * 0.8), int(h * 0.8)), interpolation=cv2.INTER_AREA)
 
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    proc = preprocess_image(gray, invert)
     image_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     pil_image = Image.fromarray(image_rgb)
     canvas_w, canvas_h = pil_image.size
