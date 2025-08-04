@@ -64,20 +64,14 @@ def detect_dish(gray_img):
     return None
 
 def extract_circle_geometry(obj):
-    """
-    Extract true circle center (x, y) and radius (r) in image pixel coordinates.
-    """
     raw_r = obj.get("radius", 50)
     left = obj.get("left", 0)
     top = obj.get("top", 0)
     scale_x = obj.get("scaleX", 1.0)
     scale_y = obj.get("scaleY", 1.0)
 
-    # Apply average scale
     scale = (scale_x + scale_y) / 2
     r = raw_r * scale
-
-    # Compute center
     x = left + raw_r * scale_x
     y = top + raw_r * scale_y
     return x, y, r
@@ -116,35 +110,37 @@ if uploaded_file:
                 "selectable": True
             }
         else:
+            # Allow re-editing
             circle_obj = st.session_state.locked_circle_obj.copy()
-            circle_obj["selectable"] = True  # Make it editable again if unlocked
+            circle_obj["selectable"] = True
 
-        overlay_objects.append(circle_obj)
+        overlay_objects = [circle_obj]  # Clear all others
     else:
+        # Locked mode, use only final locked circle
         circle_obj = st.session_state.locked_circle_obj.copy()
         circle_obj["selectable"] = False
-        overlay_objects.append(circle_obj)
+        overlay_objects = [circle_obj]
 
-    # Get exact circle coordinates in image pixels
+    # Get geometry of the final/locked circle
     x0, y0, r = extract_circle_geometry(circle_obj)
 
-    # Build circular mask for the image
+    # Create circle mask
     yy, xx = np.ogrid[:h, :w]
     circle_mask = (xx - x0)**2 + (yy - y0)**2 <= r**2
 
-    # Detect features on entire image
+    # Detect all features
     features = detect_features(proc, diameter, minmass, separation, confidence)
     if features is None or features.empty:
         features = pd.DataFrame(columns=["x", "y"])
 
-    # Keep only features inside the circle mask
+    # Filter by circle mask
     inside_features = features.copy()
     fx = inside_features["x"].astype(int)
     fy = inside_features["y"].astype(int)
     inside = circle_mask[fy.clip(0, h-1), fx.clip(0, w-1)]
     inside_features = inside_features[inside]
 
-    # Add green dots for detected plaques inside the ROI
+    # Add overlay dots
     for _, row in inside_features.iterrows():
         overlay_objects.append({
             "type": "circle",
@@ -157,7 +153,7 @@ if uploaded_file:
             "selectable": False
         })
 
-    # Draw canvas with original image
+    # Show canvas
     canvas_result = st_canvas(
         fill_color="rgba(255,255,255,0)",
         stroke_width=3,
@@ -171,15 +167,29 @@ if uploaded_file:
         key="editable"
     )
 
-    # Lock button
+    # Lock in the drawn circle
     if st.session_state.locked_circle_obj is None or st.session_state.edit_mode:
         if st.button("Done (Lock Circle)"):
-            for obj in canvas_result.json_data["objects"]:
-                if obj["type"] == "circle":
-                    st.session_state.locked_circle_obj = obj
-                    st.session_state.edit_mode = False
-                    st.experimental_rerun()
+            locked_circle = None
+            for obj in canvas_result.json_data.get("objects", []):
+                if obj["type"] == "circle" and obj.get("selectable", True):
+                    locked_circle = obj
+                    break  # Only one allowed
 
-    # Final output
+            if locked_circle is not None:
+                st.session_state.locked_circle_obj = locked_circle
+                st.session_state.edit_mode = False
+                st.experimental_rerun()
+            else:
+                st.error("No valid circle found. Please draw one.")
+
+    # Optional: Reset ROI
+    if not st.session_state.edit_mode:
+        if st.button("Reset ROI"):
+            st.session_state.locked_circle_obj = None
+            st.session_state.edit_mode = True
+            st.experimental_rerun()
+
+    # Final count output
     st.markdown("### Plaque Count Inside Circle")
     st.success(f"{len(inside_features)} plaques detected inside ROI")
