@@ -91,47 +91,33 @@ if uploaded_file:
     pil_img = Image.fromarray(rgb_img)
     h, w = gray.shape
 
-    # Step 1: Set editable or locked circle
     if st.session_state.locked_circle is None:
-        if st.session_state.edit_mode:
-            st.info("Adjust the circle and press 'Done' to lock it.")
-        # Detect initial circle if needed
+        # First-time detection
         detected = detect_dish(gray)
         if detected is None:
             st.error("Could not detect dish. Please upload a clearer image.")
             st.stop()
         x0, y0, r = detected
-    else:
-        x0, y0, r = st.session_state.locked_circle
-
-    # Step 2: Create overlay
-    overlay_objects = []
-    if st.session_state.locked_circle is None or st.session_state.edit_mode:
-        # Add editable circle
-        overlay_objects.append({
-            "type": "circle",
-            "left": float(x0 - r),
-            "top": float(y0 - r),
-            "radius": float(r),
-            "fill": "rgba(255,255,255,0)",
-            "stroke": "#FF0000",
-            "strokeWidth": 3,
-            "selectable": True
-        })
+        selectable = True
         mode = "transform"
     else:
-        # Add locked circle + green dots
-        mode = "transform"  # canvas still needs this mode to avoid component error
-        overlay_objects.append({
-            "type": "circle",
-            "left": float(x0 - r),
-            "top": float(y0 - r),
-            "radius": float(r),
-            "fill": "rgba(255,255,255,0)",
-            "stroke": "#FF0000",
-            "strokeWidth": 3,
-            "selectable": False
-        })
+        x0, y0, r = st.session_state.locked_circle
+        selectable = False
+        mode = None  # disables editing
+
+    overlay_objects = []
+
+    # Draw ROI circle
+    overlay_objects.append({
+        "type": "circle",
+        "left": float(x0 - r),
+        "top": float(y0 - r),
+        "radius": float(r),
+        "fill": "rgba(255,255,255,0)",
+        "stroke": "#FF0000",
+        "strokeWidth": 3,
+        "selectable": selectable
+    })
 
     # Detect features
     features = detect_features(proc, diameter, minmass, separation, confidence)
@@ -139,7 +125,7 @@ if uploaded_file:
         features = pd.DataFrame(columns=["x", "y"])
     inside_features = mask_features_in_circle(features, x0, y0, r)
 
-    # Add green markers
+    # Add green plaque markers
     for _, row in inside_features.iterrows():
         overlay_objects.append({
             "type": "circle",
@@ -152,7 +138,7 @@ if uploaded_file:
             "selectable": False
         })
 
-    # Step 3: Draw canvas
+    # Canvas
     canvas_result = st_canvas(
         fill_color="rgba(255,255,255,0)",
         stroke_width=3,
@@ -166,7 +152,7 @@ if uploaded_file:
         key="editable"
     )
 
-    # Step 4: Lock button
+    # Lock button
     if st.session_state.locked_circle is None:
         if st.button("Done (Lock Circle)"):
             coords = canvas_to_circle_data(canvas_result.json_data["objects"])
@@ -175,9 +161,6 @@ if uploaded_file:
                 st.session_state.edit_mode = False
                 st.experimental_rerun()
 
-    # Step 5: Show result
+    # Display result
     st.markdown("### Plaque Count Inside Circle")
     st.success(f"{len(inside_features)} plaques detected inside ROI")
-
-    # Debug info
-    # st.write("Locked circle:", st.session_state.locked_circle)
