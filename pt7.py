@@ -7,7 +7,7 @@ from PIL import Image
 import trackpy as tp
 
 st.set_page_config(layout="wide")
-st.title("Plaque Counter with Multiple Locked ROIs")
+st.title("Plaque Counter with Locked ROI")
 
 # Upload + parameters
 uploaded_file = st.file_uploader("Upload a petri dish photo", type=["png", "jpg", "jpeg"])
@@ -20,12 +20,10 @@ confidence = st.slider("Percentile Confidence to Keep", 0, 100, 90, 1)
 separation = st.slider("Minimum Separation", 1, 30, 5, 1) if advanced else None
 
 # Session state
-if "locked_circles" not in st.session_state:
-    st.session_state.locked_circles = []
-if "current_edit_circle" not in st.session_state:
-    st.session_state.current_edit_circle = None
-if "plaque_counts" not in st.session_state:
-    st.session_state.plaque_counts = []
+if "locked_circle_obj" not in st.session_state:
+    st.session_state.locked_circle_obj = None
+if "edit_mode" not in st.session_state:
+    st.session_state.edit_mode = True
 
 def preprocess_image(img, invert=False):
     if invert:
@@ -92,35 +90,15 @@ if uploaded_file:
 
     overlay_objects = []
 
-    # Detect all features once
-    all_features = detect_features(proc, diameter, minmass, separation, confidence)
-    if all_features is None or all_features.empty:
-        all_features = pd.DataFrame(columns=["x", "y"])
-
-    # Add locked circles
-    for locked, inside_features in zip(st.session_state.locked_circles, st.session_state.plaque_counts):
-        locked_obj = locked.copy()
-        locked_obj["selectable"] = False
-        overlay_objects.append(locked_obj)
-
-        for _, row in inside_features.iterrows():
-            overlay_objects.append({
-                "type": "circle",
-                "left": float(row["x"] - 3),
-                "top": float(row["y"] - 3),
-                "radius": 3,
-                "fill": "rgba(0,255,0,0.9)",
-                "stroke": "#003300",
-                "strokeWidth": 1,
-                "selectable": False
-            })
-
-    # Add one editable ROI
-    if st.session_state.current_edit_circle is None:
-        detected = detect_dish(gray)
-        if detected is not None:
+    if st.session_state.locked_circle_obj is None or st.session_state.edit_mode:
+        # Editable mode
+        if st.session_state.locked_circle_obj is None:
+            detected = detect_dish(gray)
+            if detected is None:
+                st.error("Could not detect dish. Please upload a clearer image.")
+                st.stop()
             x0, y0, r = detected
-            st.session_state.current_edit_circle = {
+            circle_obj = {
                 "type": "circle",
                 "left": float(x0 - r),
                 "top": float(y0 - r),
@@ -130,11 +108,43 @@ if uploaded_file:
                 "strokeWidth": 3,
                 "selectable": True
             }
+        else:
+            # Use previously saved circle_obj from locked state
+            circle_obj = st.session_state.locked_circle_obj.copy()
+            circle_obj["selectable"] = True  # Make it editable again if unlocked
 
-    if st.session_state.current_edit_circle is not None:
-        editable = st.session_state.current_edit_circle.copy()
-        editable["selectable"] = True
-        overlay_objects.append(editable)
+        overlay_objects.append(circle_obj)
+    else:
+        # Locked mode
+        circle_obj = st.session_state.locked_circle_obj.copy()
+        circle_obj["selectable"] = False  # Prevent changes
+        overlay_objects.append(circle_obj)
+
+    # Determine geometry for feature masking
+    x0, y0, r = extract_circle_geometry(circle_obj)
+
+    # Detect and filter features
+    features = detect_features(proc, diameter, minmass, separation, confidence)
+    if features is None or features.empty:
+        features = pd.DataFrame(columns=["x", "y"])
+    inside_features = features.copy()
+    dx = inside_features['x'] - x0
+    dy = inside_features['y'] - y0
+    inside = (dx ** 2 + dy ** 2) <= r ** 2
+    inside_features = inside_features[inside]
+
+    # Add green dots for inside features
+    for _, row in inside_features.iterrows():
+        overlay_objects.append({
+            "type": "circle",
+            "left": float(row["x"] - 3),
+            "top": float(row["y"] - 3),
+            "radius": 3,
+            "fill": "rgba(0,255,0,0.9)",
+            "stroke": "#003300",
+            "strokeWidth": 1,
+            "selectable": False
+        })
 
     # Draw canvas
     canvas_result = st_canvas(
@@ -150,29 +160,15 @@ if uploaded_file:
         key="editable"
     )
 
-    # Lock in ROI
-    if st.button("Done (Lock Circle)"):
-        for obj in canvas_result.json_data["objects"]:
-            if obj["type"] == "circle" and obj.get("selectable", False):
-                # Save ROI
-                st.session_state.locked_circles.append(obj)
+    # Lock button (always available in editable mode)
+    if st.session_state.locked_circle_obj is None or st.session_state.edit_mode:
+        if st.button("Done (Lock Circle)"):
+            for obj in canvas_result.json_data["objects"]:
+                if obj["type"] == "circle":
+                    st.session_state.locked_circle_obj = obj
+                    st.session_state.edit_mode = False
+                    st.experimental_rerun()
 
-                # Count plaques now
-                x0, y0, r = extract_circle_geometry(obj)
-                dx = all_features['x'] - x0
-                dy = all_features['y'] - y0
-                inside = (dx**2 + dy**2) <= r**2
-                inside_features = all_features[inside]
-                st.session_state.plaque_counts.append(inside_features)
-
-                # Clear editable circle
-                st.session_state.current_edit_circle = None
-                st.experimental_rerun()
-
-    # Show count summary
-    st.markdown("### Locked ROIs and Plaque Counts")
-    if st.session_state.locked_circles:
-        for i, features in enumerate(st.session_state.plaque_counts, start=1):
-            st.success(f"ROI {i}: {len(features)} plaques detected inside")
-    else:
-        st.info("Lock an ROI to start counting plaques.")
+    # Final output
+    st.markdown("### Plaque Count Inside Circle")
+    st.success(f"{len(inside_features)} plaques detected inside ROI")
