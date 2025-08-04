@@ -51,7 +51,7 @@ if "plaque_log" not in st.session_state:
 if mobile_file:
     file_bytes = np.asarray(bytearray(mobile_file.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-    
+
     while img.nbytes > 1_000_000:
         h, w = img.shape[:2]
         img = cv2.resize(img, (int(w * 0.8), int(h * 0.8)), interpolation=cv2.INTER_AREA)
@@ -62,12 +62,12 @@ if mobile_file:
     pil_image = Image.fromarray(image_rgb)
     canvas_w, canvas_h = pil_image.size
 
-    # === Detect Features Once ===
+    # === Detect Features ===
     features = detect_features(proc, diameter, minmass, separation, confidence)
-    if features is None:
+    if features is None or features.empty:
         features = pd.DataFrame(columns=["x", "y"])
 
-    # === Retrieve Previous Ellipse or Use Default ===
+    # === Get Existing Ellipse or Define New ===
     ellipse = {
         "type": "ellipse",
         "left": canvas_w // 4,
@@ -88,18 +88,19 @@ if mobile_file:
                 break
 
     # === Compute Ellipse Position ===
-    left = ellipse["left"]
-    top = ellipse["top"]
-    rx = ellipse["rx"]
-    ry = ellipse["ry"]
+    left = ellipse.get("left", canvas_w // 4)
+    top = ellipse.get("top", canvas_h // 4)
+    rx = ellipse.get("rx", canvas_w // 6)
+    ry = ellipse.get("ry", canvas_h // 6)
     width = ellipse.get("width", 2 * rx)
     height = ellipse.get("height", 2 * ry)
     cx = left + width / 2
     cy = top + height / 2
 
+    # === Mask features inside ellipse
     mask_feats = ellipse_mask_filter(features, cx, cy, rx, ry)
 
-    # === Build Shape List ===
+    # === Add green circles for detected plaques
     canvas_objects = [ellipse]
     for _, row in mask_feats.iterrows():
         canvas_objects.append({
@@ -118,7 +119,7 @@ if mobile_file:
         "objects": canvas_objects
     }
 
-    # === Display Canvas ===
+    # === Display Canvas
     st.markdown("Move and resize the red ellipse to select a dish region.")
     canvas_result = st_canvas(
         fill_color="rgba(255, 255, 255, 0)",
@@ -133,19 +134,21 @@ if mobile_file:
         key="ellipse_canvas"
     )
 
-    # === Live Count Display ===
-    st.markdown("### Plaque Count")
+    # === Live Count Display
+    st.markdown("### Live Plaque Count")
     st.write(f"Ellipse 1: **{len(mask_feats)} plaques detected**")
 
-    # === Save to CSV (optional) ===
-    new_rows = [{
-        "image_title": mobile_file.name,
-        "ellipse_id": "Ellipse 1",
-        "num_plaques": len(mask_feats)
-    }]
+    # === Update Session Log and Offer CSV
+    st.session_state.plaque_log = st.session_state.plaque_log[
+        st.session_state.plaque_log.image_title != mobile_file.name
+    ]
     st.session_state.plaque_log = pd.concat([
         st.session_state.plaque_log,
-        pd.DataFrame(new_rows)
+        pd.DataFrame([{
+            "image_title": mobile_file.name,
+            "ellipse_id": "Ellipse 1",
+            "num_plaques": len(mask_feats)
+        }])
     ], ignore_index=True)
 
     csv = st.session_state.plaque_log.to_csv(index=False).encode("utf-8")
