@@ -56,19 +56,19 @@ if mobile_file:
         h, w = img.shape[:2]
         img = cv2.resize(img, (int(w * 0.8), int(h * 0.8)), interpolation=cv2.INTER_AREA)
 
-    # -- Preprocess image before feature detection --
+    # Preprocess image
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     proc = preprocess_image(gray, invert)
     image_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     pil_image = Image.fromarray(image_rgb)
     canvas_w, canvas_h = pil_image.size
 
-    # -- Detect features --
+    # Detect features
     features = detect_features(proc, diameter, minmass, separation, confidence)
     if features is None or features.empty:
         features = pd.DataFrame(columns=["x", "y"])
 
-    # -- Initialize or load ellipse from session state --
+    # Initialize ellipse only once
     if "ellipse_state" not in st.session_state:
         st.session_state.ellipse_state = {
             "type": "ellipse",
@@ -82,17 +82,32 @@ if mobile_file:
             "angle": 0
         }
 
-    # -- Update ellipse from canvas if changed --
-    if st.session_state.get("ellipse_canvas") and st.session_state.ellipse_canvas.get("json_data"):
-        json_data = st.session_state.ellipse_canvas["json_data"]
-        for obj in json_data.get("objects", []):
-            if obj["type"] == "ellipse":
+    # Draw canvas with current ellipse
+    canvas_result = st_canvas(
+        fill_color="rgba(255, 255, 255, 0)",
+        stroke_width=3,
+        stroke_color="#FF0000",
+        background_image=pil_image,
+        update_streamlit=True,
+        height=canvas_h,
+        width=canvas_w,
+        drawing_mode="transform",
+        initial_drawing={
+            "version": "4.4.0",
+            "objects": [st.session_state.ellipse_state]
+        },
+        key="ellipse_canvas"
+    )
+
+    # Update ellipse only if user edited it
+    if canvas_result.json_data and "objects" in canvas_result.json_data:
+        for obj in canvas_result.json_data["objects"]:
+            if obj.get("type") == "ellipse":
                 st.session_state.ellipse_state = obj
                 break
 
+    # Extract ellipse info
     ellipse = st.session_state.ellipse_state
-
-    # -- Compute ellipse center and size --
     left = ellipse.get("left", canvas_w // 4)
     top = ellipse.get("top", canvas_h // 4)
     rx = ellipse.get("rx", canvas_w // 6)
@@ -102,10 +117,10 @@ if mobile_file:
     cx = left + width / 2
     cy = top + height / 2
 
-    # -- Filter features inside ellipse --
+    # Filter features inside ellipse
     mask_feats = ellipse_mask_filter(features, cx, cy, rx, ry)
 
-    # -- Add plaque circles overlay --
+    # Add feature circles overlay
     canvas_objects = [ellipse]
     for _, row in mask_feats.iterrows():
         canvas_objects.append({
@@ -119,31 +134,11 @@ if mobile_file:
             "selectable": False
         })
 
-    initial_shape = {
-        "version": "4.4.0",
-        "objects": canvas_objects
-    }
-
-    # -- Render the canvas --
-    st.markdown("Move and resize the red ellipse to select a dish region.")
-    canvas_result = st_canvas(
-        fill_color="rgba(255, 255, 255, 0)",
-        stroke_width=3,
-        stroke_color="#FF0000",
-        background_image=pil_image,
-        update_streamlit=True,
-        height=canvas_h,
-        width=canvas_w,
-        drawing_mode="transform",
-        initial_drawing=initial_shape,
-        key="ellipse_canvas"
-    )
-
-    # -- Live count display --
+    # Update live view
     st.markdown("### Live Plaque Count")
     st.write(f"Ellipse 1: **{len(mask_feats)} plaques detected**")
 
-    # -- Update session log, avoiding duplicates --
+    # Update log (remove duplicates)
     st.session_state.plaque_log = st.session_state.plaque_log[
         st.session_state.plaque_log.image_title != mobile_file.name
     ]
@@ -156,5 +151,6 @@ if mobile_file:
         }])
     ], ignore_index=True)
 
+    # Export
     csv = st.session_state.plaque_log.to_csv(index=False).encode("utf-8")
     st.download_button("Download CSV", data=csv, file_name="plaque_counts.csv", mime="text/csv")
