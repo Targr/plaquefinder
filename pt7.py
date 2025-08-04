@@ -47,10 +47,6 @@ def ellipse_mask_filter(features, cx, cy, rx, ry):
     inside = ((dx / rx) ** 2 + (dy / ry) ** 2) <= 1
     return features[inside]
 
-# Init persistent ellipse
-if "ellipse_state" not in st.session_state:
-    st.session_state.ellipse_state = None
-
 if mobile_file:
     # Load image and shrink if needed
     file_bytes = np.asarray(bytearray(mobile_file.read()), dtype=np.uint8)
@@ -65,47 +61,13 @@ if mobile_file:
     pil_image = Image.fromarray(rgb_image)
     canvas_w, canvas_h = pil_image.size
 
-    # Set ellipse default if not yet initialized
-    if st.session_state.ellipse_state is None:
-        st.session_state.ellipse_state = {
-            "type": "ellipse",
-            "left": canvas_w // 4,
-            "top": canvas_h // 4,
-            "width": canvas_w // 2,
-            "height": canvas_h // 2,
-            "fill": "rgba(255,255,255,0)",
-            "stroke": "#FF0000",
-            "strokeWidth": 3,
-            "angle": 0
-        }
-
     # Detect plaques
     features = detect_features(proc, diameter, minmass, separation, confidence)
     if features is None or features.empty:
         features = pd.DataFrame(columns=["x", "y"])
 
-    # Parse ellipse center/radii
-    ellipse = st.session_state.ellipse_state
-    cx = ellipse["left"] + ellipse["width"] / 2
-    cy = ellipse["top"] + ellipse["height"] / 2
-    rx = ellipse["width"] / 2
-    ry = ellipse["height"] / 2
-
-    # Draw canvas objects
-    objects = [ellipse] + [
-        {
-            "type": "circle",
-            "left": float(row["x"]) - 3,
-            "top": float(row["y"]) - 3,
-            "radius": 3,
-            "fill": "rgba(0,255,0,0.9)",
-            "stroke": "#003300",
-            "strokeWidth": 1,
-            "selectable": False
-        }
-        for _, row in features.iterrows()
-    ]
-
+    # Always draw only current ellipse and green overlays
+    ellipse_object = None
     canvas_result = st_canvas(
         fill_color="rgba(255,255,255,0)",
         stroke_width=3,
@@ -115,26 +77,55 @@ if mobile_file:
         height=canvas_h,
         width=canvas_w,
         drawing_mode="transform",
-        initial_drawing={"version": "4.4.0", "objects": objects},
         key="ellipse_canvas"
     )
 
-    # Capture new ellipse only if changed
+    # If an ellipse was drawn, extract and use it
     if canvas_result.json_data and "objects" in canvas_result.json_data:
         for obj in canvas_result.json_data["objects"]:
             if obj.get("type") == "ellipse":
-                st.session_state.ellipse_state = obj
+                ellipse_object = obj
                 break
 
-    # Re-parse ellipse after potential update
-    ellipse = st.session_state.ellipse_state
-    cx = ellipse["left"] + ellipse["width"] / 2
-    cy = ellipse["top"] + ellipse["height"] / 2
-    rx = ellipse["width"] / 2
-    ry = ellipse["height"] / 2
+    if ellipse_object:
+        cx = ellipse_object["left"] + ellipse_object["width"] / 2
+        cy = ellipse_object["top"] + ellipse_object["height"] / 2
+        rx = ellipse_object["width"] / 2
+        ry = ellipse_object["height"] / 2
 
-    # Count features inside ellipse
-    inside_features = ellipse_mask_filter(features, cx, cy, rx, ry)
+        inside_features = ellipse_mask_filter(features, cx, cy, rx, ry)
 
-    st.markdown("### Live Plaque Count")
-    st.success(f"{len(inside_features)} plaques detected inside selected region")
+        # Redraw ellipse and lime-green overlay on features
+        overlay_objects = [
+            ellipse_object
+        ] + [
+            {
+                "type": "circle",
+                "left": float(row["x"]) - 3,
+                "top": float(row["y"]) - 3,
+                "radius": 3,
+                "fill": "rgba(0,255,0,0.9)",
+                "stroke": "#003300",
+                "strokeWidth": 1,
+                "selectable": False
+            }
+            for _, row in inside_features.iterrows()
+        ]
+
+        st_canvas(
+            fill_color="rgba(255,255,255,0)",
+            stroke_width=3,
+            stroke_color="#FF0000",
+            background_image=pil_image,
+            update_streamlit=False,
+            height=canvas_h,
+            width=canvas_w,
+            initial_drawing={"version": "4.4.0", "objects": overlay_objects},
+            drawing_mode="transform",
+            key="ellipse_overlay_canvas"
+        )
+
+        st.markdown("### Live Plaque Count")
+        st.success(f"{len(inside_features)} plaques detected inside selected region")
+    else:
+        st.warning("Draw an ellipse to select a region of interest.")
