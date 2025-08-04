@@ -45,12 +45,13 @@ def ellipse_mask_filter(features, cx, cy, rx, ry):
     inside = ((dx / rx) ** 2 + (dy / ry) ** 2) <= 1
     return features[inside]
 
+# Session init
 if "plaque_log" not in st.session_state:
     st.session_state.plaque_log = pd.DataFrame(columns=["image_title", "ellipse_id", "num_plaques"])
-
-# Initialize canvas shape tracker
-if "last_drawn_id" not in st.session_state:
-    st.session_state.last_drawn_id = 0
+if "ellipse_initialized" not in st.session_state:
+    st.session_state.ellipse_initialized = False
+if "ellipse_state" not in st.session_state:
+    st.session_state.ellipse_state = None  # Placeholder
 
 if mobile_file:
     file_bytes = np.asarray(bytearray(mobile_file.read()), dtype=np.uint8)
@@ -72,8 +73,8 @@ if mobile_file:
     if features is None or features.empty:
         features = pd.DataFrame(columns=["x", "y"])
 
-    # Initialize ellipse if not present
-    if "ellipse_state" not in st.session_state:
+    # Initialize ellipse once
+    if not st.session_state.ellipse_initialized:
         st.session_state.ellipse_state = {
             "type": "ellipse",
             "left": canvas_w // 4,
@@ -85,25 +86,24 @@ if mobile_file:
             "strokeWidth": 3,
             "angle": 0
         }
+        st.session_state.ellipse_initialized = True
 
-    # Prepare canvas with ellipse and feature overlays
+    # Assemble canvas objects
     canvas_objects = [st.session_state.ellipse_state]
-
-    # Add lime green overlays for all features
     for _, row in features.iterrows():
         canvas_objects.append({
             "type": "circle",
             "left": float(row["x"]) - 3,
             "top": float(row["y"]) - 3,
             "radius": 3,
-            "fill": "rgba(50, 255, 50, 0.9)",  # lime green
+            "fill": "rgba(50,255,50,0.9)",  # lime green
             "stroke": "#003300",
             "strokeWidth": 1,
             "selectable": False
         })
 
-    # Draw the canvas with stored ellipse + features
-    canvas_result = st_canvas(
+    # Draw the canvas — pass initial_drawing only once
+    canvas_kwargs = dict(
         fill_color="rgba(255, 255, 255, 0)",
         stroke_width=3,
         stroke_color="#FF0000",
@@ -112,20 +112,22 @@ if mobile_file:
         height=canvas_h,
         width=canvas_w,
         drawing_mode="transform",
-        initial_drawing={
-            "version": "4.4.0",
-            "objects": canvas_objects
-        },
         key="ellipse_canvas"
     )
 
-    # Update the ellipse state ONLY if user actually made a change
+    if not st.session_state.get("ellipse_used_once"):
+        canvas_kwargs["initial_drawing"] = {"version": "4.4.0", "objects": canvas_objects}
+        st.session_state["ellipse_used_once"] = True
+
+    canvas_result = st_canvas(**canvas_kwargs)
+
+    # Update ellipse only if user modified it
     if canvas_result.json_data and "objects" in canvas_result.json_data:
         ellipses = [obj for obj in canvas_result.json_data["objects"] if obj.get("type") == "ellipse"]
         if ellipses:
-            st.session_state.ellipse_state = ellipses[-1]  # use latest ellipse drawn/moved
+            st.session_state.ellipse_state = ellipses[-1]
 
-    # Use ellipse state to compute geometry
+    # Geometry from ellipse
     ellipse = st.session_state.ellipse_state
     left = ellipse.get("left", canvas_w // 4)
     top = ellipse.get("top", canvas_h // 4)
@@ -136,14 +138,14 @@ if mobile_file:
     cx = left + width / 2
     cy = top + height / 2
 
-    # Filter features inside ellipse
+    # Count features in ellipse
     mask_feats = ellipse_mask_filter(features, cx, cy, rx, ry)
 
-    # Count display
+    # Live count
     st.markdown("### Live Plaque Count")
     st.write(f"Ellipse 1: **{len(mask_feats)} plaques detected**")
 
-    # Update log (remove previous entry for this image)
+    # Update session log
     st.session_state.plaque_log = st.session_state.plaque_log[
         st.session_state.plaque_log.image_title != mobile_file.name
     ]
@@ -156,6 +158,6 @@ if mobile_file:
         }])
     ], ignore_index=True)
 
-    # Download CSV
+    # CSV download
     csv = st.session_state.plaque_log.to_csv(index=False).encode("utf-8")
     st.download_button("Download CSV", data=csv, file_name="plaque_counts.csv", mime="text/csv")
