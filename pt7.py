@@ -141,12 +141,12 @@ canvas_result = st_canvas(
 
 
     # === Live Count Display
-    st.markdown("### Live Plaque Count")
-    st.write(f"Ellipse 1: **{len(mask_feats)} plaques detected**")
+st.markdown("### Live Plaque Count")
+st.write(f"Ellipse 1: **{len(mask_feats)} plaques detected**")
 
     # === Update Session Log and Offer CSV
-    st.session_state.plaque_log = st.session_state.plaque_log[
-        st.session_state.plaque_log.image_title != mobile_file.name
+st.session_state.plaque_log = st.session_state.plaque_log[
+    st.session_state.plaque_log.image_title != mobile_file.name
     ]
     st.session_state.plaque_log = pd.concat([
         st.session_state.plaque_log,
