@@ -62,13 +62,14 @@ if mobile_file:
     pil_image = Image.fromarray(image_rgb)
     canvas_w, canvas_h = pil_image.size
 
-    # === Detect Features ===
-    features = detect_features(proc, diameter, minmass, separation, confidence)
-    if features is None or features.empty:
-        features = pd.DataFrame(columns=["x", "y"])
+# === Detect features
+features = detect_features(proc, diameter, minmass, separation, confidence)
+if features is None or features.empty:
+    features = pd.DataFrame(columns=["x", "y"])
 
-    # === Get Existing Ellipse or Define New ===
-    ellipse = {
+# === Initialize ellipse in session state if missing
+if "ellipse_state" not in st.session_state:
+    st.session_state.ellipse_state = {
         "type": "ellipse",
         "left": canvas_w // 4,
         "top": canvas_h // 4,
@@ -80,59 +81,64 @@ if mobile_file:
         "angle": 0
     }
 
-    if st.session_state.get("ellipse_canvas") and st.session_state.ellipse_canvas.get("json_data"):
-        json_data = st.session_state.ellipse_canvas["json_data"]
-        for obj in json_data.get("objects", []):
-            if obj["type"] == "ellipse":
-                ellipse = obj
-                break
+# === Pull user-modified ellipse if it exists in canvas_result
+if st.session_state.get("ellipse_canvas") and st.session_state.ellipse_canvas.get("json_data"):
+    json_data = st.session_state.ellipse_canvas["json_data"]
+    for obj in json_data.get("objects", []):
+        if obj["type"] == "ellipse":
+            # Save updated shape to session state
+            st.session_state.ellipse_state = obj
+            break
 
-    # === Compute Ellipse Position ===
-    left = ellipse.get("left", canvas_w // 4)
-    top = ellipse.get("top", canvas_h // 4)
-    rx = ellipse.get("rx", canvas_w // 6)
-    ry = ellipse.get("ry", canvas_h // 6)
-    width = ellipse.get("width", 2 * rx)
-    height = ellipse.get("height", 2 * ry)
-    cx = left + width / 2
-    cy = top + height / 2
+ellipse = st.session_state.ellipse_state
 
-    # === Mask features inside ellipse
-    mask_feats = ellipse_mask_filter(features, cx, cy, rx, ry)
+# === Compute ellipse center and size
+left = ellipse.get("left", canvas_w // 4)
+top = ellipse.get("top", canvas_h // 4)
+rx = ellipse.get("rx", canvas_w // 6)
+ry = ellipse.get("ry", canvas_h // 6)
+width = ellipse.get("width", 2 * rx)
+height = ellipse.get("height", 2 * ry)
+cx = left + width / 2
+cy = top + height / 2
 
-    # === Add green circles for detected plaques
-    canvas_objects = [ellipse]
-    for _, row in mask_feats.iterrows():
-        canvas_objects.append({
-            "type": "circle",
-            "left": float(row["x"]) - 3,
-            "top": float(row["y"]) - 3,
-            "radius": 3,
-            "fill": "rgba(0,255,0,0.8)",
-            "stroke": "#000000",
-            "strokeWidth": 1,
-            "selectable": False
-        })
+# === Filter features inside ellipse
+mask_feats = ellipse_mask_filter(features, cx, cy, rx, ry)
 
-    initial_shape = {
-        "version": "4.4.0",
-        "objects": canvas_objects
-    }
+# === Green overlay markers
+canvas_objects = [ellipse]
+for _, row in mask_feats.iterrows():
+    canvas_objects.append({
+        "type": "circle",
+        "left": float(row["x"]) - 3,
+        "top": float(row["y"]) - 3,
+        "radius": 3,
+        "fill": "rgba(0,255,0,0.8)",
+        "stroke": "#000000",
+        "strokeWidth": 1,
+        "selectable": False
+    })
 
-    # === Display Canvas
-    st.markdown("Move and resize the red ellipse to select a dish region.")
-    canvas_result = st_canvas(
-        fill_color="rgba(255, 255, 255, 0)",
-        stroke_width=3,
-        stroke_color="#FF0000",
-        background_image=pil_image,
-        update_streamlit=True,
-        height=canvas_h,
-        width=canvas_w,
-        drawing_mode="transform",
-        initial_drawing=initial_shape,
-        key="ellipse_canvas"
-    )
+initial_shape = {
+    "version": "4.4.0",
+    "objects": canvas_objects
+}
+
+# === Render canvas
+st.markdown("Move and resize the red ellipse to select a dish region.")
+canvas_result = st_canvas(
+    fill_color="rgba(255, 255, 255, 0)",
+    stroke_width=3,
+    stroke_color="#FF0000",
+    background_image=pil_image,
+    update_streamlit=True,
+    height=canvas_h,
+    width=canvas_w,
+    drawing_mode="transform",
+    initial_drawing=initial_shape,
+    key="ellipse_canvas"
+)
+
 
     # === Live Count Display
     st.markdown("### Live Plaque Count")
