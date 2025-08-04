@@ -83,7 +83,6 @@ if uploaded_file:
         img = cv2.resize(img, (int(w * 0.8), int(h * 0.8)), interpolation=cv2.INTER_AREA)
 
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    proc = preprocess_image(gray, invert)
     rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     pil_img = Image.fromarray(rgb_img)
     h, w = gray.shape
@@ -109,32 +108,31 @@ if uploaded_file:
                 "selectable": True
             }
         else:
-            # Use previously saved circle_obj from locked state
             circle_obj = st.session_state.locked_circle_obj.copy()
-            circle_obj["selectable"] = True  # Make it editable again if unlocked
+            circle_obj["selectable"] = True
 
         overlay_objects.append(circle_obj)
     else:
-        # Locked mode
         circle_obj = st.session_state.locked_circle_obj.copy()
-        circle_obj["selectable"] = False  # Prevent changes
+        circle_obj["selectable"] = False
         overlay_objects.append(circle_obj)
 
-    # Determine geometry for feature masking
+    # Extract locked ROI coordinates
     x0, y0, r = extract_circle_geometry(circle_obj)
 
-    # Detect and filter features
+    # === Apply hard circular mask to remove all outside pixels ===
+    proc = preprocess_image(gray, invert)
+    mask = np.zeros_like(proc, dtype=np.uint8)
+    cv2.circle(mask, (int(x0), int(y0)), int(r), (255), thickness=-1)
+    proc = cv2.bitwise_and(proc, mask)
+
+    # === Detect features strictly inside masked area ===
     features = detect_features(proc, diameter, minmass, separation, confidence)
     if features is None or features.empty:
         features = pd.DataFrame(columns=["x", "y"])
-    inside_features = features.copy()
-    dx = inside_features['x'] - x0
-    dy = inside_features['y'] - y0
-    inside = (dx ** 2 + dy ** 2) <= r ** 2
-    inside_features = inside_features[inside]
 
-    # Add green dots for inside features
-    for _, row in inside_features.iterrows():
+    # Add green dots for detected features
+    for _, row in features.iterrows():
         overlay_objects.append({
             "type": "circle",
             "left": float(row["x"] - 3),
@@ -160,7 +158,7 @@ if uploaded_file:
         key="editable"
     )
 
-    # Lock button (always available in editable mode)
+    # Lock button
     if st.session_state.locked_circle_obj is None or st.session_state.edit_mode:
         if st.button("Done (Lock Circle)"):
             for obj in canvas_result.json_data["objects"]:
@@ -171,4 +169,4 @@ if uploaded_file:
 
     # Final output
     st.markdown("### Plaque Count Inside Circle")
-    st.success(f"{len(inside_features)} plaques detected inside ROI")
+    st.success(f"{len(features)} plaques detected inside ROI")
