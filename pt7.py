@@ -91,23 +91,27 @@ if uploaded_file:
     pil_img = Image.fromarray(rgb_img)
     h, w = gray.shape
 
-    if st.session_state.locked_circle is None:
-        # First-time detection
-        detected = detect_dish(gray)
-        if detected is None:
-            st.error("Could not detect dish. Please upload a clearer image.")
-            st.stop()
-        x0, y0, r = detected
+    # Determine ROI state
+    if st.session_state.locked_circle is None or st.session_state.edit_mode:
+        # Editable
+        if st.session_state.locked_circle is None:
+            detected = detect_dish(gray)
+            if detected is None:
+                st.error("Could not detect dish. Please upload a clearer image.")
+                st.stop()
+            x0, y0, r = detected
+        else:
+            x0, y0, r = st.session_state.locked_circle
         selectable = True
-        mode = "transform"
     else:
+        # Locked state
         x0, y0, r = st.session_state.locked_circle
         selectable = False
-        mode = None  # disables editing
 
+    mode = "transform"
     overlay_objects = []
 
-    # Draw ROI circle
+    # Draw ROI
     overlay_objects.append({
         "type": "circle",
         "left": float(x0 - r),
@@ -119,13 +123,12 @@ if uploaded_file:
         "selectable": selectable
     })
 
-    # Detect features
+    # Detect and show features
     features = detect_features(proc, diameter, minmass, separation, confidence)
     if features is None or features.empty:
         features = pd.DataFrame(columns=["x", "y"])
     inside_features = mask_features_in_circle(features, x0, y0, r)
 
-    # Add green plaque markers
     for _, row in inside_features.iterrows():
         overlay_objects.append({
             "type": "circle",
@@ -138,7 +141,7 @@ if uploaded_file:
             "selectable": False
         })
 
-    # Canvas
+    # Draw canvas
     canvas_result = st_canvas(
         fill_color="rgba(255,255,255,0)",
         stroke_width=3,
@@ -152,8 +155,8 @@ if uploaded_file:
         key="editable"
     )
 
-    # Lock button
-    if st.session_state.locked_circle is None:
+    # Lock button (always shown during transform)
+    if selectable:
         if st.button("Done (Lock Circle)"):
             coords = canvas_to_circle_data(canvas_result.json_data["objects"])
             if coords is not None:
@@ -161,6 +164,6 @@ if uploaded_file:
                 st.session_state.edit_mode = False
                 st.experimental_rerun()
 
-    # Display result
+    # Show result
     st.markdown("### Plaque Count Inside Circle")
     st.success(f"{len(inside_features)} plaques detected inside ROI")
