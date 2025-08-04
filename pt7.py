@@ -109,31 +109,30 @@ if uploaded_file:
                 "selectable": True
             }
         else:
-            # Use previously saved circle_obj from locked state
             circle_obj = st.session_state.locked_circle_obj.copy()
-            circle_obj["selectable"] = True  # Make it editable again if unlocked
+            circle_obj["selectable"] = True
 
         overlay_objects.append(circle_obj)
     else:
-        # Locked mode
         circle_obj = st.session_state.locked_circle_obj.copy()
-        circle_obj["selectable"] = False  # Prevent changes
+        circle_obj["selectable"] = False
         overlay_objects.append(circle_obj)
 
-    # Determine geometry for feature masking
+    # Geometry
     x0, y0, r = extract_circle_geometry(circle_obj)
 
-    # Detect and filter features
+    # Detect features on full image
     features = detect_features(proc, diameter, minmass, separation, confidence)
     if features is None or features.empty:
         features = pd.DataFrame(columns=["x", "y"])
-    inside_features = features.copy()
-    dx = inside_features['x'] - x0
-    dy = inside_features['y'] - y0
-    inside = (dx ** 2 + dy ** 2) <= r ** 2
-    inside_features = inside_features[inside]
 
-    # Add green dots for inside features
+    # Post-process: remove anything outside ROI
+    dx = features['x'] - x0
+    dy = features['y'] - y0
+    inside = (dx ** 2 + dy ** 2) <= r ** 2
+    inside_features = features[inside]
+
+    # Show green dots only for inside ones
     for _, row in inside_features.iterrows():
         overlay_objects.append({
             "type": "circle",
@@ -160,7 +159,7 @@ if uploaded_file:
         key="editable"
     )
 
-    # Lock button (always available in editable mode)
+    # Lock button
     if st.session_state.locked_circle_obj is None or st.session_state.edit_mode:
         if st.button("Done (Lock Circle)"):
             for obj in canvas_result.json_data["objects"]:
