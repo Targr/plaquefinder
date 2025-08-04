@@ -13,13 +13,51 @@ st.title("Plaque Counter with Locked ROI")
 uploaded_file = st.file_uploader("Upload a petri dish photo", type=["png", "jpg", "jpeg", "tiff", "tif"])
 advanced = st.checkbox("Advanced Settings")
 
-invert = st.checkbox("Invert image", value=True) if advanced else False
-diameter = st.slider("Feature Diameter", 5, 51, 15, 2)
-minmass = st.slider("Minimum Mass", 1, 100, 10, 1)
-confidence = st.slider("Percentile Confidence to Keep", 0, 100, 90, 1)
-separation = st.slider("Minimum Separation", 1, 30, 5, 1) if advanced else None
+# --- Colony or Plaque (Invert toggle) ---
+mode = st.radio("Image Type", options=["Colony", "Plaque"], index=1, horizontal=True)
+invert = mode == "Plaque"
 
-# Session state
+# --- Parameter Sliders ---
+slider_kwargs = dict(label_visibility="visible" if advanced else "collapsed")
+diameter = st.slider("Feature Diameter", 5, 51, 15, 2, **slider_kwargs)
+minmass = st.slider("Minimum Mass", 1, 100, 10, 1, **slider_kwargs)
+confidence = st.slider("Percentile Confidence to Keep", 0, 100, 90, 1, **slider_kwargs)
+separation = st.slider("Minimum Separation", 1, 30, 5, 1, **slider_kwargs) if advanced else None
+
+# --- Parameter Saving & Loading ---
+if "saved_param_sets" not in st.session_state:
+    st.session_state.saved_param_sets = {}
+
+st.markdown("#### Save or Load Parameter Sets")
+with st.expander("🔧 Manage Parameter Sets", expanded=False):
+    param_name = st.text_input("Save current parameters as:")
+    if st.button("Save Parameters"):
+        if param_name:
+            st.session_state.saved_param_sets[param_name] = {
+                "invert": invert,
+                "diameter": diameter,
+                "minmass": minmass,
+                "confidence": confidence,
+                "separation": separation,
+            }
+            st.success(f"Saved as '{param_name}'")
+        else:
+            st.warning("Please enter a name to save the parameters.")
+
+    if st.session_state.saved_param_sets:
+        selected = st.selectbox("Load saved parameters", options=["Select..."] + list(st.session_state.saved_param_sets.keys()))
+        if selected != "Select...":
+            params = st.session_state.saved_param_sets[selected]
+            invert = params["invert"]
+            diameter = params["diameter"]
+            minmass = params["minmass"]
+            confidence = params["confidence"]
+            separation = params["separation"]
+            # Update mode toggle accordingly
+            mode = "Plaque" if invert else "Colony"
+            st.success(f"Loaded parameters: '{selected}'")
+
+# --- Session state for ROI ---
 if "locked_circle_obj" not in st.session_state:
     st.session_state.locked_circle_obj = None
 if "edit_mode" not in st.session_state:
