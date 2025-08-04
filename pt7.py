@@ -10,7 +10,7 @@ st.set_page_config(layout="wide")
 st.title("Plaque Counter with Locked ROI")
 
 # Upload + parameters
-uploaded_file = st.file_uploader("Upload a petri dish photo", type=["png", "jpg", "jpeg"])
+uploaded_file = st.file_uploader("Upload a petri dish photo", type=["png", "jpg", "jpeg", "tiff", "tif"])
 advanced = st.checkbox("Advanced Settings")
 
 invert = st.checkbox("Invert image", value=True) if advanced else False
