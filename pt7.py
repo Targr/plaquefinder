@@ -7,7 +7,7 @@ from PIL import Image
 import trackpy as tp
 
 st.set_page_config(layout="wide")
-st.title("Touch-Friendly Plaque Counter")
+st.title("Automatic Plaque Counter with Dish Detection")
 
 # Upload + parameters
 mobile_file = st.file_uploader("Take a photo of a dish", type=["png", "jpg", "jpeg"])
@@ -19,7 +19,6 @@ minmass = st.slider("Minimum Mass", 1, 100, 10, 1)
 confidence = st.slider("Percentile Confidence to Keep", 0, 100, 90, 1)
 separation = st.slider("Minimum Separation", 1, 30, 5, 1) if advanced else None
 
-# Helper functions
 def preprocess_image(img, invert=False):
     if invert:
         img = cv2.bitwise_not(img)
@@ -41,14 +40,30 @@ def detect_features(gray, diameter, minmass, separation, confidence):
         features = pd.DataFrame()
     return features
 
-def ellipse_mask_filter(features, cx, cy, rx, ry):
-    dx = features['x'] - cx
-    dy = features['y'] - cy
-    inside = ((dx / rx) ** 2 + (dy / ry) ** 2) <= 1
+def detect_dish(gray_img):
+    gray_blur = cv2.medianBlur(gray_img, 5)
+    circles = cv2.HoughCircles(
+        gray_blur,
+        cv2.HOUGH_GRADIENT,
+        dp=1.2,
+        minDist=gray_img.shape[0] // 4,
+        param1=100,
+        param2=30,
+        minRadius=gray_img.shape[0] // 5,
+        maxRadius=gray_img.shape[0] // 2
+    )
+    if circles is not None:
+        circles = np.uint16(np.around(circles))
+        return circles[0][0]  # take first detected circle (x, y, r)
+    return None
+
+def mask_features_in_circle(features, x0, y0, r):
+    dx = features['x'] - x0
+    dy = features['y'] - y0
+    inside = (dx ** 2 + dy ** 2) <= r ** 2
     return features[inside]
 
 if mobile_file:
-    # Load and resize image if needed
     file_bytes = np.asarray(bytearray(mobile_file.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
     while img.nbytes > 1_000_000:
@@ -61,60 +76,34 @@ if mobile_file:
     pil_image = Image.fromarray(rgb_image)
     canvas_w, canvas_h = pil_image.size
 
-    # Detect plaques
+    # Step 1: detect dish automatically
+    detected_circle = detect_dish(gray)
+    if detected_circle is None:
+        st.error("Could not automatically detect dish. Please retake the photo with a clearer circle.")
+        st.stop()
+
+    x0, y0, r = detected_circle
+    st.success(f"Detected dish at x={x0}, y={y0}, radius={r}")
+
+    # Step 2: detect features
     features = detect_features(proc, diameter, minmass, separation, confidence)
     if features is None or features.empty:
         features = pd.DataFrame(columns=["x", "y"])
 
-    # Determine whether to draw or transform
-    ellipse_object = None
-    canvas_result = st_canvas(
-        fill_color="rgba(255,255,255,0)",
-        stroke_width=3,
-        stroke_color="#FF0000",
-        background_image=pil_image,
-        update_streamlit=True,
-        height=canvas_h,
-        width=canvas_w,
-        drawing_mode="transform",  # may be updated below
-        key="main_canvas"
-    )
+    inside_features = mask_features_in_circle(features, x0, y0, r)
 
-    # Check if an ellipse has been drawn
-    if canvas_result.json_data and "objects" in canvas_result.json_data:
-        for obj in canvas_result.json_data["objects"]:
-            if obj.get("type") == "ellipse":
-                ellipse_object = obj
-                break
-
-    # If no ellipse: let user draw one
-    if ellipse_object is None:
-        st.warning("Draw an ellipse to select a region of interest.")
-        draw_result = st_canvas(
-            fill_color="rgba(255,255,255,0)",
-            stroke_width=3,
-            stroke_color="#FF0000",
-            background_image=pil_image,
-            update_streamlit=True,
-            height=canvas_h,
-            width=canvas_w,
-            drawing_mode="ellipse",
-            key="draw_canvas"
-        )
-        st.stop()
-
-    # Ellipse exists — extract coordinates
-    cx = ellipse_object["left"] + ellipse_object["width"] / 2
-    cy = ellipse_object["top"] + ellipse_object["height"] / 2
-    rx = ellipse_object["width"] / 2
-    ry = ellipse_object["height"] / 2
-
-    # Filter features within the ellipse
-    inside_features = ellipse_mask_filter(features, cx, cy, rx, ry)
-
-    # Overlay ellipse + green plaques
+    # Step 3: draw overlay
     overlay_objects = [
-        ellipse_object
+        {
+            "type": "circle",
+            "left": float(x0 - r),
+            "top": float(y0 - r),
+            "radius": float(r),
+            "fill": "rgba(255,255,255,0)",
+            "stroke": "#FF0000",
+            "strokeWidth": 3,
+            "selectable": False
+        }
     ] + [
         {
             "type": "circle",
@@ -129,7 +118,7 @@ if mobile_file:
         for _, row in inside_features.iterrows()
     ]
 
-    # Display overlay
+    # Step 4: show result
     st_canvas(
         fill_color="rgba(255,255,255,0)",
         stroke_width=3,
@@ -140,9 +129,8 @@ if mobile_file:
         width=canvas_w,
         initial_drawing={"version": "4.4.0", "objects": overlay_objects},
         drawing_mode="transform",
-        key="overlay_canvas"
+        key="ai_overlay"
     )
 
-    # Display count
-    st.markdown("### Live Plaque Count")
-    st.success(f"{len(inside_features)} plaques detected inside selected region")
+    st.markdown("### Live Plaque Count (Auto-Detected Region)")
+    st.success(f"{len(inside_features)} plaques detected inside dish")
