@@ -157,5 +157,5 @@ st.session_state.plaque_log = pd.concat([
         }])
     ], ignore_index=True)
 
-    csv = st.session_state.plaque_log.to_csv(index=False).encode("utf-8")
-    st.download_button("Download CSV", data=csv, file_name="plaque_counts.csv", mime="text/csv")
+csv = st.session_state.plaque_log.to_csv(index=False).encode("utf-8")
+st.download_button("Download CSV", data=csv, file_name="plaque_counts.csv", mime="text/csv")
