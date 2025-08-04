@@ -59,27 +59,66 @@ if mobile_file:
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     proc = preprocess_image(gray, invert)
     image_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-
     pil_image = Image.fromarray(image_rgb)
     canvas_w, canvas_h = pil_image.size
 
-    initial_shape = {
-        "version": "4.4.0",
-        "objects": [
-            {
-                "type": "ellipse",
-                "left": canvas_w // 4,
-                "top": canvas_h // 4,
-                "rx": canvas_w // 6,
-                "ry": canvas_h // 6,
-                "fill": "rgba(255,255,255,0)",
-                "stroke": "#FF0000",
-                "strokeWidth": 3,
-                "angle": 0
-            }
-        ]
+    # === Detect Features Once ===
+    features = detect_features(proc, diameter, minmass, separation, confidence)
+    if features is None:
+        features = pd.DataFrame(columns=["x", "y"])
+
+    # === Retrieve Previous Ellipse or Use Default ===
+    ellipse = {
+        "type": "ellipse",
+        "left": canvas_w // 4,
+        "top": canvas_h // 4,
+        "rx": canvas_w // 6,
+        "ry": canvas_h // 6,
+        "fill": "rgba(255,255,255,0)",
+        "stroke": "#FF0000",
+        "strokeWidth": 3,
+        "angle": 0
     }
 
+    if st.session_state.get("ellipse_canvas") and st.session_state.ellipse_canvas.get("json_data"):
+        json_data = st.session_state.ellipse_canvas["json_data"]
+        for obj in json_data.get("objects", []):
+            if obj["type"] == "ellipse":
+                ellipse = obj
+                break
+
+    # === Compute Ellipse Position ===
+    left = ellipse["left"]
+    top = ellipse["top"]
+    rx = ellipse["rx"]
+    ry = ellipse["ry"]
+    width = ellipse.get("width", 2 * rx)
+    height = ellipse.get("height", 2 * ry)
+    cx = left + width / 2
+    cy = top + height / 2
+
+    mask_feats = ellipse_mask_filter(features, cx, cy, rx, ry)
+
+    # === Build Shape List ===
+    canvas_objects = [ellipse]
+    for _, row in mask_feats.iterrows():
+        canvas_objects.append({
+            "type": "circle",
+            "left": float(row["x"]) - 3,
+            "top": float(row["y"]) - 3,
+            "radius": 3,
+            "fill": "rgba(0,255,0,0.8)",
+            "stroke": "#000000",
+            "strokeWidth": 1,
+            "selectable": False
+        })
+
+    initial_shape = {
+        "version": "4.4.0",
+        "objects": canvas_objects
+    }
+
+    # === Display Canvas ===
     st.markdown("Move and resize the red ellipse to select a dish region.")
     canvas_result = st_canvas(
         fill_color="rgba(255, 255, 255, 0)",
@@ -94,39 +133,20 @@ if mobile_file:
         key="ellipse_canvas"
     )
 
-    if canvas_result.json_data is not None:
-        objs = canvas_result.json_data["objects"]
-        if objs:
-            features = detect_features(proc, diameter, minmass, separation, confidence)
-            features = features if features is not None else pd.DataFrame(columns=["x", "y"])
+    # === Live Count Display ===
+    st.markdown("### Plaque Count")
+    st.write(f"Ellipse 1: **{len(mask_feats)} plaques detected**")
 
-            new_rows = []
-            st.markdown("### Plaque Counts")
-            for i, obj in enumerate(objs):
-                if obj["type"] == "ellipse":
-                    left = obj["left"]
-                    top = obj["top"]
-                    rx = obj["rx"]
-                    ry = obj["ry"]
-                    width = obj.get("width", 2 * rx)
-                    height = obj.get("height", 2 * ry)
-                    cx = left + width / 2
-                    cy = top + height / 2
-
-                    mask_feats = ellipse_mask_filter(features, cx, cy, rx, ry)
-                    count = len(mask_feats)
-
-                    st.write(f"Ellipse {i+1}: **{count} plaques detected**")
-                    new_rows.append({
-                        "image_title": mobile_file.name,
-                        "ellipse_id": f"Ellipse {i + 1}",
-                        "num_plaques": count
-                    })
-
-            st.session_state.plaque_log = pd.concat([
-                st.session_state.plaque_log,
-                pd.DataFrame(new_rows)
-            ], ignore_index=True)
+    # === Save to CSV (optional) ===
+    new_rows = [{
+        "image_title": mobile_file.name,
+        "ellipse_id": "Ellipse 1",
+        "num_plaques": len(mask_feats)
+    }]
+    st.session_state.plaque_log = pd.concat([
+        st.session_state.plaque_log,
+        pd.DataFrame(new_rows)
+    ], ignore_index=True)
 
     csv = st.session_state.plaque_log.to_csv(index=False).encode("utf-8")
     st.download_button("Download CSV", data=csv, file_name="plaque_counts.csv", mime="text/csv")
