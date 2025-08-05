@@ -14,8 +14,8 @@ uploaded_file = st.file_uploader("Upload a petri dish photo", type=["png", "jpg"
 advanced = st.checkbox("Advanced Settings")
 
 # --- Colony or Plaque (Invert toggle) ---
-mode = st.radio("Image Type", options=["Colony", "Plaque"], index=1, horizontal=True)
-invert = mode == "Plaque"
+mode = st.radio("Feature Type", options=["Colony", "Plaque"], index=1, horizontal=True)
+invert = mode == "Colony"
 
 # --- Parameter Sliders ---
 slider_kwargs = dict(label_visibility="visible" if advanced else "visible")
@@ -54,7 +54,7 @@ with st.expander("Manage Parameter Sets", expanded=False):
             confidence = params["confidence"]
             separation = params["separation"]
             # Update mode toggle accordingly
-            mode = "Plaque" if invert else "Colony"
+            mode = "Colony" if invert else "Plaque"
             st.success(f"Loaded parameters: '{selected}'")
 
 # --- Session state for ROI ---
@@ -229,8 +229,8 @@ if uploaded_file:
             st.experimental_rerun()
 
     # Final count output
-    st.markdown("### Plaque Count Inside Circle")
-    st.success(f"{len(inside_features)} plaques detected inside ROI")
+    st.markdown("### Plaque/Colony Count Inside Circle")
+    st.success(f"{len(inside_features)} features detected inside ROI")
 
 # --- Batch Mode for Folder Processing ---
 st.markdown("---")
@@ -271,10 +271,10 @@ if batch_files and st.button("Process Folder and Export CSV"):
             count = len(inside_features)
             results.append((file.name, count))
 
-        df = pd.DataFrame(results, columns=["image_name", "plaque_count"])
+        df = pd.DataFrame(results, columns=["image_name", "feature_count"])
         st.markdown("### Batch Results")
         st.dataframe(df)
 
         csv = df.to_csv(index=False).encode("utf-8")
-        st.download_button("Download CSV", csv, "plaque_counts.csv", "text/csv")
+        st.download_button("Download CSV", csv, "feature_counts.csv", "text/csv")
 
