@@ -234,7 +234,7 @@ if uploaded_file:
             if locked_circle is not None:
                 st.session_state.locked_circle_obj = locked_circle
                 st.session_state.edit_mode = False
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.error("No valid circle found. Please draw one.")
 
@@ -242,7 +242,7 @@ if uploaded_file:
         if st.button("Reset ROI"):
             st.session_state.locked_circle_obj = None
             st.session_state.edit_mode = True
-            st.experimental_rerun()
+            st.rerun()
 
     st.markdown("### Plaque/Colony Count Inside Circle")
     st.success(f"{len(inside_features)} features detected inside ROI")
