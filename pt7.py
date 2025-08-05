@@ -231,3 +231,50 @@ if uploaded_file:
     # Final count output
     st.markdown("### Plaque Count Inside Circle")
     st.success(f"{len(inside_features)} plaques detected inside ROI")
+
+# --- Batch Mode for Folder Processing ---
+st.markdown("---")
+st.header("Batch Process a Folder of Images")
+
+batch_files = st.file_uploader("Upload multiple dish images (same ROI and settings will apply)", type=["png", "jpg", "jpeg", "tif", "tiff"], accept_multiple_files=True)
+
+if batch_files and st.button("Process Folder and Export CSV"):
+    if st.session_state.locked_circle_obj is None:
+        st.error("You must first lock an ROI on a sample image before batch processing.")
+    else:
+        results = []
+        for file in batch_files:
+            file_bytes = np.asarray(bytearray(file.read()), dtype=np.uint8)
+            img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+            while img.nbytes > 1_000_000:
+                h, w = img.shape[:2]
+                img = cv2.resize(img, (int(w * 0.8), int(h * 0.8)), interpolation=cv2.INTER_AREA)
+
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            proc = preprocess_image(gray, invert)
+            h, w = gray.shape
+
+            # Reuse locked ROI
+            x0, y0, r = extract_circle_geometry(st.session_state.locked_circle_obj)
+            yy, xx = np.ogrid[:h, :w]
+            circle_mask = (xx - x0) ** 2 + (yy - y0) ** 2 <= r ** 2
+
+            features = detect_features(proc, diameter, minmass, separation, confidence)
+            if features is None or features.empty:
+                features = pd.DataFrame(columns=["x", "y"])
+
+            fx = features["x"].astype(int)
+            fy = features["y"].astype(int)
+            inside = circle_mask[fy.clip(0, h-1), fx.clip(0, w-1)]
+            inside_features = features[inside]
+
+            count = len(inside_features)
+            results.append((file.name, count))
+
+        df = pd.DataFrame(results, columns=["image_name", "plaque_count"])
+        st.markdown("### 📊 Batch Results")
+        st.dataframe(df)
+
+        csv = df.to_csv(index=False).encode("utf-8")
+        st.download_button("Download CSV", csv, "plaque_counts.csv", "text/csv")
+
