@@ -24,6 +24,8 @@ minmass = st.slider("Minimum Mass (signal:noise)", 1, 100, 10, 1, **slider_kwarg
 confidence = st.slider("Percentile Confidence to Keep", 0, 100, 90, 1, **slider_kwargs)
 separation = st.slider("Minimum Separation (px)", 1, 30, 5, 1, **slider_kwargs) if advanced else None
 
+import json
+
 # --- Parameter Saving & Loading ---
 if "saved_param_sets" not in st.session_state:
     st.session_state.saved_param_sets = {}
@@ -44,18 +46,35 @@ with st.expander("Manage Parameter Sets", expanded=False):
         else:
             st.warning("Please enter a name to save the parameters.")
 
-    if st.session_state.saved_param_sets:
-        selected = st.selectbox("Load saved parameters", options=["Select..."] + list(st.session_state.saved_param_sets.keys()))
-        if selected != "Select...":
-            params = st.session_state.saved_param_sets[selected]
-            invert = params["invert"]
-            diameter = params["diameter"]
-            minmass = params["minmass"]
-            confidence = params["confidence"]
-            separation = params["separation"]
-            # Update mode toggle accordingly
-            mode = "Colony" if invert else "Plaque"
-            st.success(f"Loaded parameters: '{selected}'")
+if st.session_state.saved_param_sets:
+    selected = st.selectbox("Load saved parameters", options=["Select..."] + list(st.session_state.saved_param_sets.keys()))
+    if selected != "Select...":
+        params = st.session_state.saved_param_sets[selected]
+        invert = params["invert"]
+        diameter = params["diameter"]
+        minmass = params["minmass"]
+        confidence = params["confidence"]
+        separation = params["separation"]
+        # Update mode toggle accordingly
+        mode = "Colony" if invert else "Plaque"
+        st.success(f"Loaded parameters: '{selected}'")
+
+        # Download all parameter sets
+    param_json = json.dumps(st.session_state.saved_param_sets, indent=2)
+    st.download_button("Download All Saved Parameters (.txt)", data=param_json, file_name="saved_parameters.txt", mime="text/plain")
+
+    # Upload to re-import
+    uploaded_param_file = st.file_uploader("Load parameters from .txt", type=["txt"])
+    if uploaded_param_file:
+        try:
+            loaded_params = json.load(uploaded_param_file)
+            if isinstance(loaded_params, dict):
+                st.session_state.saved_param_sets.update(loaded_params)
+                st.success("Parameters successfully loaded and added to memory.")
+            else:
+                st.error("Invalid parameter file format.")
+        except Exception as e:
+            st.error(f"Error reading file: {e}")
 
 # --- Session state for ROI ---
 if "locked_circle_obj" not in st.session_state:
