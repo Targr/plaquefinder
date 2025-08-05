@@ -272,7 +272,7 @@ if batch_files and st.button("Process Folder and Export CSV"):
             results.append((file.name, count))
 
         df = pd.DataFrame(results, columns=["image_name", "plaque_count"])
-        st.markdown("### 📊 Batch Results")
+        st.markdown("### Batch Results")
         st.dataframe(df)
 
         csv = df.to_csv(index=False).encode("utf-8")
