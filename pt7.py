@@ -3,28 +3,27 @@ from streamlit_drawable_canvas import st_canvas
 import cv2
 import numpy as np
 import pandas as pd
-from PIL import Image
+from PIL import Image, ImageDraw
 import trackpy as tp
+import json
+import io
+import base64
+import zipfile
 
 st.set_page_config(layout="wide")
 st.title("Plaque/Colony Counter")
 
-# Upload + parameters
 uploaded_file = st.file_uploader("Upload a petri dish photo", type=["png", "jpg", "jpeg", "tiff", "tif"])
 advanced = st.checkbox("Advanced Settings")
 
-# --- Colony or Plaque (Invert toggle) ---
 mode = st.radio("Feature Type", options=["Colony", "Plaque"], index=1, horizontal=True)
 invert = mode == "Colony"
 
-# --- Parameter Sliders ---
 slider_kwargs = dict(label_visibility="visible" if advanced else "visible")
 diameter = st.slider("Feature Diameter (px)", 5, 51, 15, 2, **slider_kwargs)
 minmass = st.slider("Minimum Mass (signal:noise)", 1, 100, 10, 1, **slider_kwargs)
 confidence = st.slider("Percentile Confidence to Keep", 0, 100, 90, 1, **slider_kwargs)
 separation = st.slider("Minimum Separation (px)", 1, 30, 5, 1, **slider_kwargs) if advanced else None
-
-import json
 
 # --- Parameter Saving & Loading ---
 if "saved_param_sets" not in st.session_state:
@@ -46,24 +45,21 @@ with st.expander("Manage Parameter Sets", expanded=False):
         else:
             st.warning("Please enter a name to save the parameters.")
 
-if st.session_state.saved_param_sets:
-    selected = st.selectbox("Load saved parameters", options=["Select..."] + list(st.session_state.saved_param_sets.keys()))
-    if selected != "Select...":
-        params = st.session_state.saved_param_sets[selected]
-        invert = params["invert"]
-        diameter = params["diameter"]
-        minmass = params["minmass"]
-        confidence = params["confidence"]
-        separation = params["separation"]
-        # Update mode toggle accordingly
-        mode = "Colony" if invert else "Plaque"
-        st.success(f"Loaded parameters: '{selected}'")
+    if st.session_state.saved_param_sets:
+        selected = st.selectbox("Load saved parameters", options=["Select..."] + list(st.session_state.saved_param_sets.keys()))
+        if selected != "Select...":
+            params = st.session_state.saved_param_sets[selected]
+            invert = params["invert"]
+            diameter = params["diameter"]
+            minmass = params["minmass"]
+            confidence = params["confidence"]
+            separation = params["separation"]
+            mode = "Colony" if invert else "Plaque"
+            st.success(f"Loaded parameters: '{selected}'")
 
-        # Download all parameter sets
-    param_json = json.dumps(st.session_state.saved_param_sets, indent=2)
-    st.download_button("Download All Saved Parameters (.txt)", data=param_json, file_name="saved_parameters.txt", mime="text/plain")
+        param_json = json.dumps(st.session_state.saved_param_sets, indent=2)
+        st.download_button("Download All Saved Parameters (.txt)", data=param_json, file_name="saved_parameters.txt", mime="text/plain")
 
-    # Upload to re-import
     uploaded_param_file = st.file_uploader("Load parameters from .txt", type=["txt"])
     if uploaded_param_file:
         try:
@@ -117,7 +113,7 @@ def detect_dish(gray_img):
     )
     if circles is not None:
         circles = np.uint16(np.around(circles))
-        return circles[0][0]  # x, y, r
+        return circles[0][0]
     return None
 
 def extract_circle_geometry(obj):
@@ -126,12 +122,27 @@ def extract_circle_geometry(obj):
     top = obj.get("top", 0)
     scale_x = obj.get("scaleX", 1.0)
     scale_y = obj.get("scaleY", 1.0)
-
     scale = (scale_x + scale_y) / 2
     r = raw_r * scale
     x = left + raw_r * scale_x
     y = top + raw_r * scale_y
     return x, y, r
+
+def draw_features_on_image(image, features):
+    draw = ImageDraw.Draw(image)
+    for _, row in features.iterrows():
+        x, y = row["x"], row["y"]
+        r = 5
+        draw.ellipse([(x - r, y - r), (x + r, y + r)], outline="lime", width=2)
+    return image
+
+def pil_to_base64_thumbnail(pil_img, size=(100, 100)):
+    img_copy = pil_img.copy()
+    img_copy.thumbnail(size)
+    buffered = io.BytesIO()
+    img_copy.save(buffered, format="PNG")
+    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+    return f"data:image/png;base64,{img_str}"
 
 if uploaded_file:
     file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
@@ -149,7 +160,6 @@ if uploaded_file:
     overlay_objects = []
 
     if st.session_state.locked_circle_obj is None or st.session_state.edit_mode:
-        # Editable mode
         if st.session_state.locked_circle_obj is None:
             detected = detect_dish(gray)
             if detected is None:
@@ -167,37 +177,28 @@ if uploaded_file:
                 "selectable": True
             }
         else:
-            # Allow re-editing
             circle_obj = st.session_state.locked_circle_obj.copy()
             circle_obj["selectable"] = True
 
-        overlay_objects = [circle_obj]  # Clear all others
+        overlay_objects = [circle_obj]
     else:
-        # Locked mode, use only final locked circle
         circle_obj = st.session_state.locked_circle_obj.copy()
         circle_obj["selectable"] = False
         overlay_objects = [circle_obj]
 
-    # Get geometry of the final/locked circle
     x0, y0, r = extract_circle_geometry(circle_obj)
-
-    # Create circle mask
     yy, xx = np.ogrid[:h, :w]
     circle_mask = (xx - x0)**2 + (yy - y0)**2 <= r**2
 
-    # Detect all features
     features = detect_features(proc, diameter, minmass, separation, confidence)
     if features is None or features.empty:
         features = pd.DataFrame(columns=["x", "y"])
 
-    # Filter by circle mask
-    inside_features = features.copy()
-    fx = inside_features["x"].astype(int)
-    fy = inside_features["y"].astype(int)
+    fx = features["x"].astype(int)
+    fy = features["y"].astype(int)
     inside = circle_mask[fy.clip(0, h-1), fx.clip(0, w-1)]
-    inside_features = inside_features[inside]
+    inside_features = features[inside]
 
-    # Add overlay dots
     for _, row in inside_features.iterrows():
         overlay_objects.append({
             "type": "circle",
@@ -210,7 +211,6 @@ if uploaded_file:
             "selectable": False
         })
 
-    # Show canvas
     canvas_result = st_canvas(
         fill_color="rgba(255,255,255,0)",
         stroke_width=3,
@@ -224,15 +224,13 @@ if uploaded_file:
         key="editable"
     )
 
-    # Lock in the drawn circle
     if st.session_state.locked_circle_obj is None or st.session_state.edit_mode:
         if st.button("Done (Lock Circle)"):
             locked_circle = None
             for obj in canvas_result.json_data.get("objects", []):
                 if obj["type"] == "circle" and obj.get("selectable", True):
                     locked_circle = obj
-                    break  # Only one allowed
-
+                    break
             if locked_circle is not None:
                 st.session_state.locked_circle_obj = locked_circle
                 st.session_state.edit_mode = False
@@ -240,60 +238,79 @@ if uploaded_file:
             else:
                 st.error("No valid circle found. Please draw one.")
 
-    # Optional: Reset ROI
     if not st.session_state.edit_mode:
         if st.button("Reset ROI"):
             st.session_state.locked_circle_obj = None
             st.session_state.edit_mode = True
             st.experimental_rerun()
 
-    # Final count output
     st.markdown("### Plaque/Colony Count Inside Circle")
     st.success(f"{len(inside_features)} features detected inside ROI")
 
-# --- Batch Mode for Folder Processing ---
+# --- Batch Mode ---
 st.markdown("---")
 st.header("Batch Process a Folder of Images")
 
 batch_files = st.file_uploader("Upload multiple dish images (same ROI and settings will apply)", type=["png", "jpg", "jpeg", "tif", "tiff"], accept_multiple_files=True)
+add_thumbnails = st.checkbox("Add image thumbnails to CSV")
+add_zip_download = st.checkbox("Include ZIP download of overlaid images")
 
 if batch_files and st.button("Process Folder and Export CSV"):
     if st.session_state.locked_circle_obj is None:
         st.error("You must first lock an ROI on a sample image before batch processing.")
     else:
         results = []
-        for file in batch_files:
-            file_bytes = np.asarray(bytearray(file.read()), dtype=np.uint8)
-            img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-            while img.nbytes > 1_000_000:
-                h, w = img.shape[:2]
-                img = cv2.resize(img, (int(w * 0.8), int(h * 0.8)), interpolation=cv2.INTER_AREA)
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w") as zip_file:
+            for file in batch_files:
+                file_bytes = np.asarray(bytearray(file.read()), dtype=np.uint8)
+                img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+                while img.nbytes > 1_000_000:
+                    h, w = img.shape[:2]
+                    img = cv2.resize(img, (int(w * 0.8), int(h * 0.8)), interpolation=cv2.INTER_AREA)
 
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            proc = preprocess_image(gray, invert)
-            h, w = gray.shape
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                proc = preprocess_image(gray, invert)
+                h, w = gray.shape
 
-            # Reuse locked ROI
-            x0, y0, r = extract_circle_geometry(st.session_state.locked_circle_obj)
-            yy, xx = np.ogrid[:h, :w]
-            circle_mask = (xx - x0) ** 2 + (yy - y0) ** 2 <= r ** 2
+                x0, y0, r = extract_circle_geometry(st.session_state.locked_circle_obj)
+                yy, xx = np.ogrid[:h, :w]
+                circle_mask = (xx - x0) ** 2 + (yy - y0) ** 2 <= r ** 2
 
-            features = detect_features(proc, diameter, minmass, separation, confidence)
-            if features is None or features.empty:
-                features = pd.DataFrame(columns=["x", "y"])
+                features = detect_features(proc, diameter, minmass, separation, confidence)
+                if features is None or features.empty:
+                    features = pd.DataFrame(columns=["x", "y"])
 
-            fx = features["x"].astype(int)
-            fy = features["y"].astype(int)
-            inside = circle_mask[fy.clip(0, h-1), fx.clip(0, w-1)]
-            inside_features = features[inside]
+                fx = features["x"].astype(int)
+                fy = features["y"].astype(int)
+                inside = circle_mask[fy.clip(0, h-1), fx.clip(0, w-1)]
+                inside_features = features[inside]
 
-            count = len(inside_features)
-            results.append((file.name, count))
+                count = len(inside_features)
 
-        df = pd.DataFrame(results, columns=["image_name", "feature_count"])
-        st.markdown("### Batch Results")
+                # Overlay image
+                pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+                draw_features_on_image(pil_img, inside_features)
+
+                # Add image to ZIP
+                if add_zip_download:
+                    img_io = io.BytesIO()
+                    pil_img.save(img_io, format="PNG")
+                    zip_file.writestr(file.name.replace(" ", "_"), img_io.getvalue())
+
+                # Add row
+                if add_thumbnails:
+                    results.append((file.name, count, pil_to_base64_thumbnail(pil_img)))
+                else:
+                    results.append((file.name, count))
+
+        # Export CSV
+        df = pd.DataFrame(results, columns=["image_name", "feature_count"] + (["thumbnail"] if add_thumbnails else []))
         st.dataframe(df)
 
         csv = df.to_csv(index=False).encode("utf-8")
         st.download_button("Download CSV", csv, "feature_counts.csv", "text/csv")
 
+        if add_zip_download:
+            zip_buffer.seek(0)
+            st.download_button("Download ZIP of Overlay Images", zip_buffer, "overlay_images.zip", "application/zip")
