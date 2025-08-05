@@ -8,4 +8,4 @@ scikit-image>=0.22
 matplotlib
 trackpy
 shapely
-json
+
