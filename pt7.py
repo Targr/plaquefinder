@@ -7,7 +7,7 @@ from PIL import Image
 import trackpy as tp
 
 st.set_page_config(layout="wide")
-st.title("Plaque Counter with Locked ROI")
+st.title("Plaque/Colony Counter")
 
 # Upload + parameters
 uploaded_file = st.file_uploader("Upload a petri dish photo", type=["png", "jpg", "jpeg", "tiff", "tif"])
