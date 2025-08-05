@@ -19,10 +19,10 @@ invert = mode == "Colony"
 
 # --- Parameter Sliders ---
 slider_kwargs = dict(label_visibility="visible" if advanced else "visible")
-diameter = st.slider("Feature Diameter", 5, 51, 15, 2, **slider_kwargs)
-minmass = st.slider("Minimum Mass", 1, 100, 10, 1, **slider_kwargs)
+diameter = st.slider("Feature Diameter (px)", 5, 51, 15, 2, **slider_kwargs)
+minmass = st.slider("Minimum Mass (signal:noise)", 1, 100, 10, 1, **slider_kwargs)
 confidence = st.slider("Percentile Confidence to Keep", 0, 100, 90, 1, **slider_kwargs)
-separation = st.slider("Minimum Separation", 1, 30, 5, 1, **slider_kwargs) if advanced else None
+separation = st.slider("Minimum Separation (px)", 1, 30, 5, 1, **slider_kwargs) if advanced else None
 
 # --- Parameter Saving & Loading ---
 if "saved_param_sets" not in st.session_state:
