@@ -36,7 +36,7 @@ if multi_plate_mode:
 def preprocess_image(img, invert=False):
     if invert:
         img = cv2.bitwise_not(img)
-        img = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX)
+    img = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX)
     return img
 
 def subtract_background(img):
@@ -119,64 +119,63 @@ if uploaded_file:
     file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 
-while img.nbytes > 1_000_000:
-    h, w = img.shape[:2]
-    img = cv2.resize(img, (int(w * 0.8), int(h * 0.8)), interpolation=cv2.INTER_AREA)
+    while img.nbytes > 1_000_000:
+        h, w = img.shape[:2]
+        img = cv2.resize(img, (int(w * 0.8), int(h * 0.8)), interpolation=cv2.INTER_AREA)
 
-gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-proc = subtract_background(preprocess_image(gray, invert))
-h, w = gray.shape
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    proc = subtract_background(preprocess_image(gray, invert))
+    h, w = gray.shape
 
-circles = detect_dishes(gray, max_count=max_plates)
-rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-pil_img = Image.fromarray(rgb_img)
-all_results = []
+    circles = detect_dishes(gray, max_count=max_plates)
+    rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    pil_img = Image.fromarray(rgb_img)
+    all_results = []
 
-if circles is None or len(circles) == 0:
-    st.error("No plates detected.")
-else:
-    for idx, (x, y, r) in enumerate(circles):
-        yy, xx = np.ogrid[:h, :w]
-        circle_mask = (xx - x)**2 + (yy - y)**2 <= r**2
+    if circles is None or len(circles) == 0:
+        st.error("No plates detected.")
+    else:
+        for idx, (x, y, r) in enumerate(circles):
+            yy, xx = np.ogrid[:h, :w]
+            circle_mask = (xx - x)**2 + (yy - y)**2 <= r**2
 
-roi_proc = proc.copy()
+            roi_proc = proc.copy()
 roi_proc[~circle_mask] = 128
-roi_proc = cv2.convertScaleAbs(roi_proc, alpha=3.0, beta=-128)
+roi_proc = cv2.convertScaleAbs(roi_proc, alpha=3.0, beta=0)
 features = detect_features(roi_proc, diameter, minmass, separation, confidence)
 if features is None or features.empty:
     features = pd.DataFrame(columns=["x", "y"])
 
-    fx = features["x"].astype(int)
-    fy = features["y"].astype(int)
-    inside = circle_mask[fy.clip(0, h-1), fx.clip(0, w-1)]
-    inside_features = features[inside]
+            fx = features["x"].astype(int)
+            fy = features["y"].astype(int)
+            inside = circle_mask[fy.clip(0, h-1), fx.clip(0, w-1)]
+            inside_features = features[inside]
 
-    draw_features_on_image(pil_img, inside_features)
-    draw = ImageDraw.Draw(pil_img)
-    draw.ellipse([(x - r, y - r), (x + r, y + r)], outline="red", width=3)
+            draw_features_on_image(pil_img, inside_features)
+            draw = ImageDraw.Draw(pil_img)
+            draw.ellipse([(x - r, y - r), (x + r, y + r)], outline="red", width=3)
 
-    color_counts = report_color_counts(img, inside_features)
-    color_summary = ", ".join([f"{count} of color {color}" for color, count in color_counts.items()])
+            color_counts = report_color_counts(img, inside_features)
+            color_summary = ", ".join([f"{count} of color {color}" for color, count in color_counts.items()])
 
-    st.subheader(f"Plate {idx + 1}")
-    st.success(f"{len(inside_features)} features detected inside Plate {idx + 1}")
-    if color_counts:
-        st.info(f"Breakdown: {color_summary}")
+            st.subheader(f"Plate {idx + 1}")
+            st.success(f"{len(inside_features)} features detected inside Plate {idx + 1}")
+            if color_counts:
+                st.info(f"Breakdown: {color_summary}")
 
-    all_results.append((f"Plate {idx + 1}", len(inside_features), color_counts))
+            all_results.append((f"Plate {idx + 1}", len(inside_features), color_counts))
 
-    st.image(pil_img, caption="Detected Colonies/Plaques with Annotations", use_column_width=True)
+        st.image(pil_img, caption="Detected Colonies/Plaques with Annotations", use_column_width=True)
 
-    # CSV Export
-    df = pd.DataFrame([{
-        "plate": name,
-        "count": count,
-        **{f"color_{i}": f"{v}" for i, (v, _) in enumerate(colors.items())}
-    } for name, count, colors in all_results])
+        # CSV Export
+        df = pd.DataFrame([{
+            "plate": name,
+            "count": count,
+            **{f"color_{i}": f"{v}" for i, (v, _) in enumerate(colors.items())}
+        } for name, count, colors in all_results])
 
-    csv = df.to_csv(index=False).encode("utf-8")
-    st.download_button("Download Results CSV", csv, "plate_colony_results.csv", "text/csv")
-
+        csv = df.to_csv(index=False).encode("utf-8")
+        st.download_button("Download Results CSV", csv, "plate_colony_results.csv", "text/csv")
 
 
 # Multi-Plate Colony/Plaque Counter (continued full integration)
