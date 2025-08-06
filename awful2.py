@@ -123,21 +123,21 @@ if uploaded_file:
         h, w = img.shape[:2]
         img = cv2.resize(img, (int(w * 0.8), int(h * 0.8)), interpolation=cv2.INTER_AREA)
 
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    proc = subtract_background(preprocess_image(gray, invert))
-    h, w = gray.shape
+gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+proc = subtract_background(preprocess_image(gray, invert))
+h, w = gray.shape
 
-    circles = detect_dishes(gray, max_count=max_plates)
-    rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    pil_img = Image.fromarray(rgb_img)
-    all_results = []
+circles = detect_dishes(gray, max_count=max_plates)
+rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+pil_img = Image.fromarray(rgb_img)
+all_results = []
 
-    if circles is None or len(circles) == 0:
-        st.error("No plates detected.")
-    else:
-        for idx, (x, y, r) in enumerate(circles):
-            yy, xx = np.ogrid[:h, :w]
-            circle_mask = (xx - x)**2 + (yy - y)**2 <= r**2
+if circles is None or len(circles) == 0:
+    st.error("No plates detected.")
+else:
+    for idx, (x, y, r) in enumerate(circles):
+        yy, xx = np.ogrid[:h, :w]
+        circle_mask = (xx - x)**2 + (yy - y)**2 <= r**2
 
 roi_proc = proc.copy()
 roi_proc[~circle_mask] = 128
