@@ -82,6 +82,12 @@ with st.expander("Manage Parameter Sets", expanded=False):
         except Exception as e:
             st.error(f"Error reading file: {e}")
 
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    proc = preprocess_image(gray, invert)
+    rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    pil_img = Image.fromarray(rgb_img)
+    h, w = gray.shape
+
 # --- Session state for ROI ---
 if "locked_circle_obj" not in st.session_state:
     st.session_state.locked_circle_obj = None
@@ -161,11 +167,7 @@ if uploaded_file:
         h, w = img.shape[:2]
         img = cv2.resize(img, (int(w * 0.8), int(h * 0.8)), interpolation=cv2.INTER_AREA)
 
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    proc = preprocess_image(gray, invert)
-    rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    pil_img = Image.fromarray(rgb_img)
-    h, w = gray.shape
+
 
 overlay_objects = []
 canvas_key = f"canvas_{num_plates}_{st.session_state.edit_mode_multi}"
