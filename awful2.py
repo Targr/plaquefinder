@@ -35,8 +35,8 @@ if multi_plate_mode:
 # --- Utilities ---
 def preprocess_image(img, invert=False):
     if invert:
-    img = cv2.bitwise_not(img)
-    img = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX)
+        img = cv2.bitwise_not(img)
+        img = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX)
     return img
 
 def subtract_background(img):
