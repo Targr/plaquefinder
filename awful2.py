@@ -10,13 +10,55 @@ import io
 import base64
 import zipfile
 
-# ========================== FUNCTIONS ==========================
+st.set_page_config(layout="wide")
+st.title("Multi-Plate Colony/Plaque Counter")
 
+# File uploader
+uploaded_file = st.file_uploader("Upload a petri dish photo", type=["png", "jpg", "jpeg", "tiff", "tif"])
+advanced = st.checkbox("Advanced Settings")
+
+mode = st.radio("Feature Type", options=["Colony", "Plaque"], index=1, horizontal=True)
+invert = mode == "Colony"
+slider_kwargs = dict(label_visibility="visible" if advanced else "visible")
+
+diameter = st.slider("Feature Diameter (px)", 5, 51, 15, 2, **slider_kwargs)
+minmass = st.slider("Minimum Mass (signal:noise)", 1, 100, 10, 1, **slider_kwargs)
+confidence = st.slider("Percentile Confidence to Keep", 0, 100, 90, 1, **slider_kwargs)
+separation = st.slider("Minimum Separation (px)", 1, 30, 5, 1, **slider_kwargs) if advanced else None
+
+# Multi-plate toggle and slider
+multi_plate_mode = st.checkbox("Enable Multi-Plate Detection")
+max_plates = 1
+if multi_plate_mode:
+    max_plates = st.slider("Number of Plates to Detect", 1, 20, 2)
+
+# --- Utilities ---
 def preprocess_image(img, invert=False):
     if invert:
         img = cv2.bitwise_not(img)
     img = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX)
     return img
+
+def subtract_background(img):
+    blurred = cv2.GaussianBlur(img, (31, 31), 0)
+    return cv2.subtract(img, blurred)
+
+def detect_dishes(gray_img, max_count=1):
+    gray_blur = cv2.medianBlur(gray_img, 5)
+    circles = cv2.HoughCircles(
+        gray_blur,
+        cv2.HOUGH_GRADIENT,
+        dp=1.2,
+        minDist=gray_img.shape[0] // 6,
+        param1=100,
+        param2=30,
+        minRadius=gray_img.shape[0] // 7,
+        maxRadius=gray_img.shape[0] // 2
+    )
+    if circles is not None:
+        circles = np.uint16(np.around(circles[0]))
+        return circles[:max_count]
+    return []
 
 def detect_features(gray, diameter, minmass, separation, confidence):
     norm_img = (gray / 255.0).astype(np.float32)
@@ -33,34 +75,31 @@ def detect_features(gray, diameter, minmass, separation, confidence):
         features = pd.DataFrame()
     return features
 
-def detect_dish(gray_img):
-    gray_blur = cv2.medianBlur(gray_img, 5)
-    circles = cv2.HoughCircles(
-        gray_blur,
-        cv2.HOUGH_GRADIENT,
-        dp=1.2,
-        minDist=gray_img.shape[0] // 4,
-        param1=100,
-        param2=30,
-        minRadius=gray_img.shape[0] // 5,
-        maxRadius=gray_img.shape[0] // 2
-    )
-    if circles is not None:
-        circles = np.uint16(np.around(circles))
-        return circles[0][0]
-    return None
+def analyze_colors(image, features):
+    color_labels = []
+    for _, row in features.iterrows():
+        x, y = int(row['x']), int(row['y'])
+        color = image[y, x]
+        color_labels.append(tuple(color))
+    return color_labels
 
-def extract_circle_geometry(obj):
-    raw_r = obj.get("radius", 50)
-    left = obj.get("left", 0)
-    top = obj.get("top", 0)
-    scale_x = obj.get("scaleX", 1.0)
-    scale_y = obj.get("scaleY", 1.0)
-    scale = (scale_x + scale_y) / 2
-    r = raw_r * scale
-    x = left + raw_r * scale_x
-    y = top + raw_r * scale_y
-    return x, y, r
+def cluster_colors(color_list):
+    from sklearn.cluster import KMeans
+    X = np.array(color_list)
+    k = min(len(color_list), 5)
+    if k < 1:
+        return {}
+    kmeans = KMeans(n_clusters=k, n_init=10).fit(X)
+    labels, counts = np.unique(kmeans.labels_, return_counts=True)
+    result = {}
+    for i, count in zip(labels, counts):
+        rgb = tuple(map(int, kmeans.cluster_centers_[i]))
+        result[str(rgb)] = count
+    return result
+
+def draw_detected_plates(image, circles):
+    for (x, y, r) in circles:
+        cv2.circle(image, (x, y), r, (255, 0, 0), 2)
 
 def draw_features_on_image(image, features):
     draw = ImageDraw.Draw(image)
@@ -70,33 +109,74 @@ def draw_features_on_image(image, features):
         draw.ellipse([(x - r, y - r), (x + r, y + r)], outline="lime", width=2)
     return image
 
-def pil_to_base64_thumbnail(pil_img, size=(100, 100)):
-    img_copy = pil_img.copy()
-    img_copy.thumbnail(size)
-    buffered = io.BytesIO()
-    img_copy.save(buffered, format="PNG")
-    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-    return f"data:image/png;base64,{img_str}"
+def report_color_counts(image, features):
+    colors = analyze_colors(image, features)
+    clustered = cluster_colors(colors)
+    return clustered
 
-# ========================== STREAMLIT UI ==========================
+# --- Main Processing ---
+if uploaded_file:
+    file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
+    img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 
-st.set_page_config(layout="wide")
-st.title("Plaque/Colony Counter")
+    while img.nbytes > 1_000_000:
+        h, w = img.shape[:2]
+        img = cv2.resize(img, (int(w * 0.8), int(h * 0.8)), interpolation=cv2.INTER_AREA)
 
-uploaded_file = st.file_uploader("Upload a petri dish photo", type=["png", "jpg", "jpeg", "tiff", "tif"])
-advanced = st.checkbox("Advanced Settings")
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    proc = subtract_background(preprocess_image(gray, invert))
+    h, w = gray.shape
 
-mode = st.radio("Feature Type", options=["Colony", "Plaque"], index=1, horizontal=True)
-invert = mode == "Colony"
+    circles = detect_dishes(gray, max_count=max_plates)
+    rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    pil_img = Image.fromarray(rgb_img)
+    all_results = []
 
-# Parameter sliders
-slider_kwargs = dict(label_visibility="visible" if advanced else "visible")
-diameter = st.slider("Feature Diameter (px)", 5, 51, 15, 2, **slider_kwargs)
-minmass = st.slider("Minimum Mass (signal:noise)", 1, 100, 10, 1, **slider_kwargs)
-confidence = st.slider("Percentile Confidence to Keep", 0, 100, 90, 1, **slider_kwargs)
-separation = st.slider("Minimum Separation (px)", 1, 30, 5, 1, **slider_kwargs) if advanced else None
+    if not circles:
+        st.error("No plates detected.")
+    else:
+        for idx, (x, y, r) in enumerate(circles):
+            yy, xx = np.ogrid[:h, :w]
+            circle_mask = (xx - x)**2 + (yy - y)**2 <= r**2
 
-# Parameter sets
+            features = detect_features(proc, diameter, minmass, separation, confidence)
+            if features is None or features.empty:
+                features = pd.DataFrame(columns=["x", "y"])
+
+            fx = features["x"].astype(int)
+            fy = features["y"].astype(int)
+            inside = circle_mask[fy.clip(0, h-1), fx.clip(0, w-1)]
+            inside_features = features[inside]
+
+            draw_features_on_image(pil_img, inside_features)
+            draw = ImageDraw.Draw(pil_img)
+            draw.ellipse([(x - r, y - r), (x + r, y + r)], outline="red", width=3)
+
+            color_counts = report_color_counts(img, inside_features)
+            color_summary = ", ".join([f"{count} of color {color}" for color, count in color_counts.items()])
+
+            st.subheader(f"Plate {idx + 1}")
+            st.success(f"{len(inside_features)} features detected inside Plate {idx + 1}")
+            if color_counts:
+                st.info(f"Breakdown: {color_summary}")
+
+            all_results.append((f"Plate {idx + 1}", len(inside_features), color_counts))
+
+        st.image(pil_img, caption="Detected Colonies/Plaques with Annotations", use_column_width=True)
+
+        # CSV Export
+        df = pd.DataFrame([{
+            "plate": name,
+            "count": count,
+            **{f"color_{i}": f"{v}" for i, (v, _) in enumerate(colors.items())}
+        } for name, count, colors in all_results])
+
+        csv = df.to_csv(index=False).encode("utf-8")
+        st.download_button("Download Results CSV", csv, "plate_colony_results.csv", "text/csv")
+
+# Multi-Plate Colony/Plaque Counter (continued full integration)
+
+# --- Parameter Saving & Loading ---
 if "saved_param_sets" not in st.session_state:
     st.session_state.saved_param_sets = {}
 
@@ -111,6 +191,8 @@ with st.expander("Manage Parameter Sets", expanded=False):
                 "minmass": minmass,
                 "confidence": confidence,
                 "separation": separation,
+                "max_plates": max_plates,
+                "multi": multi_plate_mode
             }
             st.success(f"Saved as '{param_name}'")
         else:
@@ -120,11 +202,13 @@ with st.expander("Manage Parameter Sets", expanded=False):
         selected = st.selectbox("Load saved parameters", options=["Select..."] + list(st.session_state.saved_param_sets.keys()))
         if selected != "Select...":
             params = st.session_state.saved_param_sets[selected]
-            invert = params["invert"]
-            diameter = params["diameter"]
-            minmass = params["minmass"]
-            confidence = params["confidence"]
-            separation = params["separation"]
+            invert = params.get("invert", False)
+            diameter = params.get("diameter", 15)
+            minmass = params.get("minmass", 10)
+            confidence = params.get("confidence", 90)
+            separation = params.get("separation", 5)
+            max_plates = params.get("max_plates", 1)
+            multi_plate_mode = params.get("multi", False)
             mode = "Colony" if invert else "Plaque"
             st.success(f"Loaded parameters: '{selected}'")
 
@@ -143,126 +227,77 @@ with st.expander("Manage Parameter Sets", expanded=False):
         except Exception as e:
             st.error(f"Error reading file: {e}")
 
-# Multi-plate ROI handling
-num_plates = st.number_input("How many plates are in the image?", min_value=1, max_value=10, value=1, step=1)
+# --- Optional Batch Upload ---
+st.markdown("---")
+st.header("Batch Process a Folder of Images")
 
-# Keep ROI list synced with current num_plates
-if "locked_circle_objs" not in st.session_state:
-    st.session_state.locked_circle_objs = [None] * num_plates
-else:
-    # Resize the list if num_plates changed
-    current_len = len(st.session_state.locked_circle_objs)
-    if current_len < num_plates:
-        st.session_state.locked_circle_objs += [None] * (num_plates - current_len)
-    elif current_len > num_plates:
-        st.session_state.locked_circle_objs = st.session_state.locked_circle_objs[:num_plates]
+batch_files = st.file_uploader("Upload multiple dish images", type=["png", "jpg", "jpeg", "tif", "tiff"], accept_multiple_files=True)
+add_thumbnails = st.checkbox("Add image thumbnails to CSV")
+add_zip_download = st.checkbox("Include ZIP download of overlaid images")
 
+if batch_files and st.button("Process Folder and Export CSV"):
+    results = []
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w") as zip_file:
+        for file in batch_files:
+            file_bytes = np.asarray(bytearray(file.read()), dtype=np.uint8)
+            img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 
-if uploaded_file:
-    file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-    img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-    while img.nbytes > 1_000_000:
-        h, w = img.shape[:2]
-        img = cv2.resize(img, (int(w * 0.8), int(h * 0.8)), interpolation=cv2.INTER_AREA)
+            while img.nbytes > 1_000_000:
+                h, w = img.shape[:2]
+                img = cv2.resize(img, (int(w * 0.8), int(h * 0.8)), interpolation=cv2.INTER_AREA)
 
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    proc = preprocess_image(gray, invert)
-    rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    pil_img = Image.fromarray(rgb_img)
-    h, w = gray.shape
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            proc = subtract_background(preprocess_image(gray, invert))
+            rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            pil_img = Image.fromarray(rgb_img)
 
-    features = detect_features(proc, diameter, minmass, separation, confidence)
-    if features is None or features.empty:
-        features = pd.DataFrame(columns=["x", "y"])
+            detected = detect_dishes(gray, max_count=max_plates)
+            for idx, (x, y, r) in enumerate(detected):
+                h, w = gray.shape
+                yy, xx = np.ogrid[:h, :w]
+                circle_mask = (xx - x) ** 2 + (yy - y) ** 2 <= r ** 2
 
-    # ROI UI
-    overlay_objects = []
-    canvas_key = f"canvas_{num_plates}_{st.session_state.edit_mode_multi}"
-
-    if st.session_state.edit_mode_multi or any(obj is None for obj in st.session_state.locked_circle_objs[:num_plates]):
-        default_circles = []
-        for i in range(num_plates):
-            if st.session_state.locked_circle_objs[i] is None:
-                detected = detect_dish(gray)
-                if detected is None:
-                    st.error(f"Could not auto-detect dish #{i+1}.")
+                features = detect_features(proc, diameter, minmass, separation, confidence)
+                if features.empty:
                     continue
-                x0, y0, r = detected
-                circle_obj = {
-                    "type": "circle",
-                    "left": float(x0 - r),
-                    "top": float(y0 - r),
-                    "radius": float(r),
-                    "fill": "rgba(255,255,255,0)",
-                    "stroke": "#FF0000",
-                    "strokeWidth": 3,
-                    "selectable": True,
-                    "name": f"circle_{i}"
+
+                fx = features["x"].astype(int)
+                fy = features["y"].astype(int)
+                inside = circle_mask[fy.clip(0, h-1), fx.clip(0, w-1)]
+                inside_features = features[inside]
+
+                color_counts = report_color_counts(img, inside_features)
+                color_summary = ", ".join([f"{count} of color {color}" for color, count in color_counts.items()])
+                draw_features_on_image(pil_img, inside_features)
+                draw = ImageDraw.Draw(pil_img)
+                draw.ellipse([(x - r, y - r), (x + r, y + r)], outline="red", width=3)
+
+                # Save overlay image
+                if add_zip_download:
+                    img_io = io.BytesIO()
+                    pil_img.save(img_io, format="PNG")
+                    zip_file.writestr(f"{file.name}_plate_{idx+1}.png", img_io.getvalue())
+
+                row = {
+                    "image_name": file.name,
+                    "plate_number": idx+1,
+                    "feature_count": len(inside_features),
+                    **{f"color_{k}": v for k, v in enumerate(color_counts.values())}
                 }
-            else:
-                circle_obj = st.session_state.locked_circle_objs[i].copy()
-                circle_obj["selectable"] = True
-                circle_obj["name"] = f"circle_{i}"
-            default_circles.append(circle_obj)
-        overlay_objects = default_circles
-    else:
-        for i in range(num_plates):
-            circle_obj = st.session_state.locked_circle_objs[i].copy()
-            circle_obj["selectable"] = False
-            overlay_objects.append(circle_obj)
+                if add_thumbnails:
+                    thumb = pil_to_base64_thumbnail(pil_img)
+                    row["thumbnail"] = thumb
 
-    canvas_result = st_canvas(
-        fill_color="rgba(255,255,255,0)",
-        stroke_width=3,
-        stroke_color="#00FF00",
-        background_image=pil_img,
-        update_streamlit=True,
-        height=h,
-        width=w,
-        initial_drawing={"version": "4.4.0", "objects": overlay_objects},
-        drawing_mode="transform",
-        key=canvas_key,
-    )
+                results.append(row)
 
-    if st.session_state.edit_mode_multi or any(obj is None for obj in st.session_state.locked_circle_objs[:num_plates]):
-        if st.button("Done (Lock All Circles)"):
-            locked = [None] * num_plates
-            found_count = 0
-            for obj in canvas_result.json_data.get("objects", []):
-                if obj["type"] == "circle" and obj.get("selectable", True):
-                    name = obj.get("name", "")
-                    if name.startswith("circle_"):
-                        idx = int(name.split("_")[1])
-                        if idx < num_plates:
-                            locked[idx] = obj
-                            found_count += 1
-            if found_count == num_plates:
-                st.session_state.locked_circle_objs = locked
-                st.session_state.edit_mode_multi = False
-                st.rerun()
-            else:
-                st.error("Please draw/select all circles.")
-    else:
-        if st.button("Reset All ROIs"):
-            st.session_state.locked_circle_objs = [None] * num_plates
-            st.session_state.edit_mode_multi = True
-            st.rerun()
+    df = pd.DataFrame(results)
+    st.dataframe(df)
 
-    # Count features inside each ROI
-    st.markdown("### Plaque/Colony Count Inside Each ROI")
-    total_count = 0
-    for idx, circle_obj in enumerate(st.session_state.locked_circle_objs[:num_plates]):
-        x0, y0, r = extract_circle_geometry(circle_obj)
-        yy, xx = np.ogrid[:h, :w]
-        circle_mask = (xx - x0)**2 + (yy - y0)**2 <= r**2
+    csv = df.to_csv(index=False).encode("utf-8")
+    st.download_button("Download Batch CSV", csv, "batch_feature_counts.csv", "text/csv")
 
-        fx = features["x"].astype(int)
-        fy = features["y"].astype(int)
-        inside = circle_mask[fy.clip(0, h-1), fx.clip(0, w-1)]
-        inside_features = features[inside]
+    if add_zip_download:
+        zip_buffer.seek(0)
+        st.download_button("Download ZIP of Overlays", zip_buffer, "overlays.zip", "application/zip")
 
-        count = len(inside_features)
-        total_count += count
-
-        st.markdown(f"**Plate #{idx + 1}**: {count} features")
-    st.success(f"Total across all ROIs: {total_count}")
