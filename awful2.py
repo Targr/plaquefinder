@@ -132,7 +132,7 @@ if uploaded_file:
     pil_img = Image.fromarray(rgb_img)
     all_results = []
 
-    if not circles:
+    if circles is None or len(circles) == 0:
         st.error("No plates detected.")
     else:
         for idx, (x, y, r) in enumerate(circles):
@@ -173,6 +173,7 @@ if uploaded_file:
 
         csv = df.to_csv(index=False).encode("utf-8")
         st.download_button("Download Results CSV", csv, "plate_colony_results.csv", "text/csv")
+
 
 # Multi-Plate Colony/Plaque Counter (continued full integration)
 
