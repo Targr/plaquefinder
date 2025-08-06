@@ -155,27 +155,27 @@ if features is None or features.empty:
     draw = ImageDraw.Draw(pil_img)
     draw.ellipse([(x - r, y - r), (x + r, y + r)], outline="red", width=3)
 
-        color_counts = report_color_counts(img, inside_features)
-        color_summary = ", ".join([f"{count} of color {color}" for color, count in color_counts.items()])
+    color_counts = report_color_counts(img, inside_features)
+    color_summary = ", ".join([f"{count} of color {color}" for color, count in color_counts.items()])
 
-        st.subheader(f"Plate {idx + 1}")
-        st.success(f"{len(inside_features)} features detected inside Plate {idx + 1}")
-        if color_counts:
-            st.info(f"Breakdown: {color_summary}")
+    st.subheader(f"Plate {idx + 1}")
+    st.success(f"{len(inside_features)} features detected inside Plate {idx + 1}")
+    if color_counts:
+        st.info(f"Breakdown: {color_summary}")
 
-        all_results.append((f"Plate {idx + 1}", len(inside_features), color_counts))
+    all_results.append((f"Plate {idx + 1}", len(inside_features), color_counts))
 
-        st.image(pil_img, caption="Detected Colonies/Plaques with Annotations", use_column_width=True)
+    st.image(pil_img, caption="Detected Colonies/Plaques with Annotations", use_column_width=True)
 
-        # CSV Export
-        df = pd.DataFrame([{
-            "plate": name,
-            "count": count,
-            **{f"color_{i}": f"{v}" for i, (v, _) in enumerate(colors.items())}
-        } for name, count, colors in all_results])
+    # CSV Export
+    df = pd.DataFrame([{
+        "plate": name,
+        "count": count,
+        **{f"color_{i}": f"{v}" for i, (v, _) in enumerate(colors.items())}
+    } for name, count, colors in all_results])
 
-        csv = df.to_csv(index=False).encode("utf-8")
-        st.download_button("Download Results CSV", csv, "plate_colony_results.csv", "text/csv")
+    csv = df.to_csv(index=False).encode("utf-8")
+    st.download_button("Download Results CSV", csv, "plate_colony_results.csv", "text/csv")
 
 
 
