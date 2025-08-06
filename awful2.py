@@ -139,7 +139,7 @@ if uploaded_file:
             yy, xx = np.ogrid[:h, :w]
             circle_mask = (xx - x)**2 + (yy - y)**2 <= r**2
 
-    roi_proc = proc.copy()
+roi_proc = proc.copy()
 roi_proc[~circle_mask] = 128
 roi_proc = cv2.convertScaleAbs(roi_proc, alpha=3.0, beta=-128)
 features = detect_features(roi_proc, diameter, minmass, separation, confidence)
