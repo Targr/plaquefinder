@@ -146,14 +146,14 @@ features = detect_features(roi_proc, diameter, minmass, separation, confidence)
 if features is None or features.empty:
     features = pd.DataFrame(columns=["x", "y"])
 
-        fx = features["x"].astype(int)
-        fy = features["y"].astype(int)
-        inside = circle_mask[fy.clip(0, h-1), fx.clip(0, w-1)]
-        inside_features = features[inside]
+    fx = features["x"].astype(int)
+    fy = features["y"].astype(int)
+    inside = circle_mask[fy.clip(0, h-1), fx.clip(0, w-1)]
+    inside_features = features[inside]
 
-        draw_features_on_image(pil_img, inside_features)
-        draw = ImageDraw.Draw(pil_img)
-        draw.ellipse([(x - r, y - r), (x + r, y + r)], outline="red", width=3)
+    draw_features_on_image(pil_img, inside_features)
+    draw = ImageDraw.Draw(pil_img)
+    draw.ellipse([(x - r, y - r), (x + r, y + r)], outline="red", width=3)
 
         color_counts = report_color_counts(img, inside_features)
         color_summary = ", ".join([f"{count} of color {color}" for color, count in color_counts.items()])
