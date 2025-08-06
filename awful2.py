@@ -19,6 +19,16 @@ advanced = st.checkbox("Advanced Settings")
 mode = st.radio("Feature Type", options=["Colony", "Plaque"], index=1, horizontal=True)
 invert = mode == "Colony"
 
+# Number of plates
+num_plates = st.number_input("How many plates are in the image?", min_value=1, max_value=10, value=1, step=1)
+
+# Session state for multiple ROIs
+if "locked_circle_objs" not in st.session_state:
+    st.session_state.locked_circle_objs = [None] * num_plates
+if "edit_mode_multi" not in st.session_state:
+    st.session_state.edit_mode_multi = True
+
+
 slider_kwargs = dict(label_visibility="visible" if advanced else "visible")
 diameter = st.slider("Feature Diameter (px)", 5, 51, 15, 2, **slider_kwargs)
 minmass = st.slider("Minimum Mass (signal:noise)", 1, 100, 10, 1, **slider_kwargs)
