@@ -119,18 +119,18 @@ if uploaded_file:
     file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 
-    while img.nbytes > 1_000_000:
-        h, w = img.shape[:2]
-        img = cv2.resize(img, (int(w * 0.8), int(h * 0.8)), interpolation=cv2.INTER_AREA)
+while img.nbytes > 1_000_000:
+    h, w = img.shape[:2]
+    img = cv2.resize(img, (int(w * 0.8), int(h * 0.8)), interpolation=cv2.INTER_AREA)
 
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    proc = subtract_background(preprocess_image(gray, invert))
-    h, w = gray.shape
+gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+proc = subtract_background(preprocess_image(gray, invert))
+h, w = gray.shape
 
-    circles = detect_dishes(gray, max_count=max_plates)
-    rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    pil_img = Image.fromarray(rgb_img)
-    all_results = []
+circles = detect_dishes(gray, max_count=max_plates)
+rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+pil_img = Image.fromarray(rgb_img)
+all_results = []
 
     if circles is None or len(circles) == 0:
         st.error("No plates detected.")
