@@ -146,10 +146,17 @@ with st.expander("Manage Parameter Sets", expanded=False):
 # Multi-plate ROI handling
 num_plates = st.number_input("How many plates are in the image?", min_value=1, max_value=10, value=1, step=1)
 
+# Keep ROI list synced with current num_plates
 if "locked_circle_objs" not in st.session_state:
     st.session_state.locked_circle_objs = [None] * num_plates
-if "edit_mode_multi" not in st.session_state:
-    st.session_state.edit_mode_multi = True
+else:
+    # Resize the list if num_plates changed
+    current_len = len(st.session_state.locked_circle_objs)
+    if current_len < num_plates:
+        st.session_state.locked_circle_objs += [None] * (num_plates - current_len)
+    elif current_len > num_plates:
+        st.session_state.locked_circle_objs = st.session_state.locked_circle_objs[:num_plates]
+
 
 if uploaded_file:
     file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
