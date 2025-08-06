@@ -139,9 +139,12 @@ if uploaded_file:
             yy, xx = np.ogrid[:h, :w]
             circle_mask = (xx - x)**2 + (yy - y)**2 <= r**2
 
-            features = detect_features(proc, diameter, minmass, separation, confidence)
-            if features is None or features.empty:
-                features = pd.DataFrame(columns=["x", "y"])
+            roi_proc = proc.copy()
+roi_proc[~circle_mask] = 128
+roi_proc = cv2.convertScaleAbs(roi_proc, alpha=3.0, beta=-128)
+features = detect_features(roi_proc, diameter, minmass, separation, confidence)
+if features is None or features.empty:
+    features = pd.DataFrame(columns=["x", "y"])
 
             fx = features["x"].astype(int)
             fy = features["y"].astype(int)
@@ -173,6 +176,7 @@ if uploaded_file:
 
         csv = df.to_csv(index=False).encode("utf-8")
         st.download_button("Download Results CSV", csv, "plate_colony_results.csv", "text/csv")
+
 
 
 # Multi-Plate Colony/Plaque Counter (continued full integration)
