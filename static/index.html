@@ -24,8 +24,9 @@
       <h5>Single Image Processing</h5>
       <form id="singleForm">
         <div class="mb-2">
-          <label class="form-label">Upload Image</label>
-          <input class="form-control" type="file" name="image" required accept="image/*">
+          <label class="form-label">Upload Image or Take Photo</label>
+          <input class="form-control" type="file" name="image" required accept="image/*" capture="environment">
+          <small class="text-muted">On mobile, this will open your rear camera.</small>
         </div>
         <div class="mb-2">
           <label class="form-label">Reference Images (Optional)</label>
