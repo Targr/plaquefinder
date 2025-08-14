@@ -271,3 +271,36 @@ def api_batch():
                 plates = result["plates"]
                 total = int(sum(p["feature_count"] for p in plates))
                 rows.append({
+                    "image_name": f.filename,
+                    "total_features": total,
+                    "plates": plates
+                })
+
+                # Save annotated image to ZIP
+                img_data = base64.b64decode(result["annotated_image_base64"])
+                zf.writestr(f.filename.replace(" ", "_"), img_data)
+
+            except Exception as e:
+                rows.append({
+                    "image_name": f.filename,
+                    "error": str(e),
+                    "plates": []
+                })
+
+    zip_buf.seek(0)
+    csv_df = pd.DataFrame(rows)
+    csv_bytes = csv_df.to_csv(index=False).encode("utf-8")
+    csv_b64 = base64.b64encode(csv_bytes).decode("utf-8")
+    zip_b64 = base64.b64encode(zip_buf.read()).decode("utf-8")
+
+    return jsonify({
+        "results": rows,
+        "csv_base64": csv_b64,
+        "zip_base64": zip_b64
+    })
+
+
+# --- Run Server ---
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=True)
